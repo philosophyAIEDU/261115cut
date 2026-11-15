@@ -63,5 +63,9 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 OUT=$BUILD/installer/SophiCut-Mac-$LABEL.dmg
 rm -f "$OUT"
-hdiutil create -volname "SophiCut" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
+for i in 1 2 3 4 5; do  # hdiutil sometimes fails with "Resource busy" on CI runners
+  hdiutil create -volname "SophiCut" -srcfolder "$STAGE" -ov -format UDZO "$OUT" && break
+  [ "$i" = 5 ] && exit 1
+  echo "hdiutil failed, retrying ($i)"; sleep 10
+done
 echo "== done: $OUT ($(du -h "$OUT" | cut -f1)) =="
