@@ -1,56 +1,73 @@
 # 소피컷 (SophiCut)
 
-대본을 보면서 컷 편집하는 로컬 영상 편집기입니다. 음성 인식은 이 컴퓨터의 AI(faster-whisper)로 하기 때문에 영상이 외부로 전송되지 않습니다.
+**말한 대로 쓰고, 쓴 대로 자릅니다.** 영상을 넣으면 AI가 원고를 받아 적고, 원고에서 지운 말은 영상에서도 잘려 나가는 영상 편집기입니다. 받아쓰기(faster-whisper)를 포함한 모든 처리가 내 컴퓨터 안에서 이루어지므로 영상이 외부로 전송되지 않습니다.
 
-## 실행
+## 설치 (일반 사용자)
 
-`소피컷 실행.bat`을 더블클릭하세요. 처음 실행할 때 필요한 패키지를 설치하고, 브라우저에서 http://127.0.0.1:7860 이 열립니다. 검은 창은 프로그램 본체이니 쓰는 동안 열어 두세요.
+1. [Releases](https://github.com/philosophyAIEDU/261115cut/releases/latest)에서 **`SophiCut-Setup.exe`** 를 내려받아 실행합니다.
+2. 「Windows의 PC 보호」 창이 뜨면 **추가 정보 → 실행**을 누릅니다.
+3. 설치가 끝나면 바탕화면의 **소피컷**을 실행하세요. 브라우저에 편집 화면이 열립니다.
 
-- 필요: Python 3.10 이상, ffmpeg (`winget install Gyan.FFmpeg`)
-- NVIDIA GPU가 있으면 자동으로 GPU를 씁니다. 없으면 CPU로 동작합니다(이때는 `small` 모델 추천).
-- AI 모델은 처음 사용할 때 한 번 내려받습니다(large-v3-turbo 약 1.6GB).
+- Python, ffmpeg 등을 따로 설치할 필요가 없습니다(설치 파일에 들어 있음).
+- NVIDIA 그래픽카드가 있으면 첫 화면의 **GPU 가속 받기**로 받아쓰기를 빠르게 할 수 있습니다.
+- 새 버전이 나오면 첫 화면에 알림이 뜹니다. 새 설치 파일을 실행하면 프로젝트를 유지한 채 업데이트됩니다.
+- 프로젝트·자막 스타일은 `%LOCALAPPDATA%\SophiCut\data` 에 저장됩니다.
 
 ## 화면 구성
 
-상단 탭은 **편집 / 자막 서식 / 삽입** 세 가지입니다. 왼쪽에 플레이어, 오른쪽에 클립(문장) 목록이 있고, 각 클립의 단어는 칩 형태로 표시됩니다.
+왼쪽 **도구 레일**(다듬기 · 자막 · 이미지 · 속도) → **도구 서랍** → 가운데 **원고** → 오른쪽 **영상**. 도구 아이콘을 한 번 더 누르면 서랍이 접힙니다.
 
-### 편집
-- 단어 칩을 클릭하면 그 위치로 이동합니다. 드래그하거나 Shift+클릭하면 범위를 선택합니다.
-- **Delete**를 누르면 선택한 부분을 잘라내고, 다시 누르면 복원합니다. 왼쪽 체크박스로 클립 단위 선택도 할 수 있습니다.
-- 더블클릭하면 글자를 고칠 수 있습니다(자막에 반영). **Enter**를 누르면 클립이 나뉘고, 체크한 클립은 하나로 합칠 수 있습니다.
-- **무음 줄이기**와 **군말 삭제**(음·어·으)로 한 번에 정리할 수 있습니다.
-
-### 자막 서식 (글꼴: Pretendard)
-- 굵기, 기울임, 크기, 글자색, 자간, 한 줄 글자수, 세로 위치를 정할 수 있습니다.
-- **테두리**(색·두께), **배경 박스**(색·불투명도), **형광펜**, **그림자**를 켜고 끌 수 있습니다.
-- **서식 모음**에서 미리 만든 서식 8종을 적용하고, **현재 서식 저장**으로 내 서식을 추가할 수 있습니다.
-- 미리보기와 결과 영상이 같은 규칙으로 그려지므로, 보이는 그대로 내보내집니다.
-
-### 삽입
-- **이미지 넣기**를 누르면 체크한 클립, 선택한 단어의 클립, 또는 재생 위치의 클립 구간에 이미지가 들어갑니다.
-- 화면에서 이미지를 끌어 옮기고, 오른쪽 아래 점을 끌어 크기를 조절합니다. 리본에서 크기, 투명도, 시작·끝 위치를 바꿀 수 있습니다.
-
-### 효과: 배속
-- 속도(0.5~4배)를 정하고 적용 범위(전체 클립 / 선택한 클립 / 현재 클립)를 골라 **적용**을 누릅니다. **1x로 되돌리기**로 원래 속도로 돌릴 수 있습니다.
-- 배속을 적용한 클립에는 ⏩ 표시가 붙고, 그 표시를 누르면 해당 클립의 배속을 바로 고칠 수 있습니다.
-- 미리보기도 해당 속도로 재생됩니다. 내보낼 때는 음 높이를 유지한 채 영상과 음성 속도를 바꾸고, 자막과 이미지 시간도 자동으로 맞춥니다.
-
-### 내보내기
-- 영상 + 자막 (MP4), 영상만 (MP4), 자막 파일 (SRT), 대본 (TXT)을 고를 수 있습니다.
-- 이미지는 두 MP4 모두에 들어갑니다.
-
-단축키: Space 재생/정지 · Ctrl+Z 되돌리기 · Ctrl+Shift+Z 다시 실행 · ←/→ 단어 이동 · Esc 선택 해제
-
-## 구조
-
-| 파일 | 역할 |
+| 도구 | 하는 일 |
 |---|---|
-| `sophicut/transcriber.py` | faster-whisper로 단어 단위 전사 (GPU 실패 시 CPU 자동 전환) |
-| `sophicut/editing.py` | 단어·무음 토큰 타임라인, 남길 구간 계산, 자막 줄 나누기, SRT/TXT 생성 |
-| `sophicut/subrender.py` | Pretendard로 자막을 투명 PNG로 렌더링 (테두리·배경·형광펜·그림자·기울임) |
-| `sophicut/media.py` | ffprobe, 미리보기 변환, 구간별 인코딩·연결, 자막·이미지 합성 (NVENC 자동 사용) |
-| `sophicut/app.py` | 로컬 웹 서버 (127.0.0.1 전용) |
-| `sophicut/static/` | 화면(UI) |
-| `sophicut/fonts/` | Pretendard (SIL Open Font License, `OFL-LICENSE.txt`) |
+| 다듬기 | 단어를 끌어 고르고 `Delete`로 자르기/되살리기, 문단 나누기·붙이기, **빈틈 정리**(말 없는 구간), **추임새 지우기**(음·어·으), 원고 찾기 |
+| 자막 | 굵기·크기·색·자간, 테두리·배경·형광펜·그림자, 한 줄 글자수·높이, 준비된 스타일 8종과 내 스타일 저장 |
+| 이미지 | 체크한 문단(또는 지금 문단) 동안 이미지 표시, 영상 위에서 끌어 옮기기·크기 조절·투명도 |
+| 속도 | 0.5~4배, 원고 전체/고른 문단/지금 문단에 적용 (목소리 높이 유지) |
 
-프로젝트 데이터는 `workspace/projects/`, 저장한 서식은 `workspace/presets.json`에 저장됩니다.
+**완성본 만들기**: 영상 + 자막(MP4), 영상만(MP4), 자막 파일(SRT), 원고(TXT).
+
+단축키: `Space` 재생/정지 · `Ctrl+Z` 되돌리기 · `Ctrl+Shift+Z` 다시 실행 · `←/→` 단어 이동 · `Enter` 문단 나누기 · `Esc` 선택 해제
+
+## 개발자용
+
+### 소스에서 실행
+
+`소피컷 실행.bat`을 더블클릭하면 처음에 `.venv`를 만들고 패키지를 설치합니다(Python·ffmpeg가 없으면 winget으로 설치). 직접 실행하려면:
+
+```bash
+pip install -r requirements.txt      # GPU 가속: pip install -r requirements-gpu.txt
+python -m sophicut                   # http://127.0.0.1:7860
+```
+
+소스 실행 시 데이터는 저장소의 `workspace/`에 저장됩니다.
+
+### 새 버전 배포하기
+
+1. `sophicut/__init__.py`의 `__version__`을 올립니다 (예: `1.0.1`).
+2. 커밋하고 같은 버전의 태그를 푸시합니다.
+   ```bash
+   git commit -am "v1.0.1"
+   git tag v1.0.1
+   git push && git push --tags
+   ```
+3. GitHub Actions(`.github/workflows/release.yml`)가 `SophiCut-Setup.exe`를 빌드해 Release에 올립니다. 설치된 앱과 홈페이지가 자동으로 새 버전을 안내합니다.
+
+로컬에서 설치 파일 만들기: `powershell -ExecutionPolicy Bypass -File packaging\build.ps1` (Inno Setup 6 필요) → `build\installer\SophiCut-Setup.exe`
+
+### 구조
+
+| 경로 | 역할 |
+|---|---|
+| `sophicut/transcriber.py` | faster-whisper 단어 단위 받아쓰기 (GPU 실패 시 CPU), GPU 라이브러리 내려받기 |
+| `sophicut/editing.py` | 단어·빈틈 토큰 타임라인, 남길 구간 계산, 자막 줄 나누기, SRT/TXT |
+| `sophicut/subrender.py` | Pretendard로 자막을 투명 PNG로 렌더링 |
+| `sophicut/media.py` | ffprobe, 미리보기 변환, 구간별 인코딩·연결, 자막·이미지 합성 (NVENC 자동) |
+| `sophicut/app.py` | 로컬 웹 서버(127.0.0.1 전용), 업데이트 확인, 자동 종료 |
+| `sophicut/static/` | 화면(UI) |
+| `packaging/` | 설치 파일 빌드 (PyInstaller + Inno Setup) |
+| `site/` | 홈페이지 (Netlify, `netlify.toml`) |
+
+### 라이선스 고지
+
+- 자막 글꼴: Pretendard — SIL Open Font License (`sophicut/fonts/OFL-LICENSE.txt`)
+- 설치 파일에 포함된 FFmpeg: GPL 빌드 (BtbN/FFmpeg-Builds), 라이선스는 설치 폴더 `ffmpeg\FFMPEG-LICENSE.txt`

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import time
 import traceback
@@ -14,10 +15,20 @@ from urllib.parse import unquote
 
 from flask import Flask, abort, jsonify, request, send_file
 
-from . import editing, media, subrender, transcriber
+from . import REPO, __version__, editing, media, subrender, transcriber
 
 ROOT = Path(__file__).resolve().parent
-DATA = Path(os.environ.get("SOPHICUT_DATA", ROOT.parent / "workspace"))
+FROZEN = getattr(sys, "frozen", False)  # installed build (SophiCut.exe)
+APPDATA = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "SophiCut"
+
+
+def _data_dir() -> Path:
+    if os.environ.get("SOPHICUT_DATA"):
+        return Path(os.environ["SOPHICUT_DATA"])
+    return APPDATA / "data" if FROZEN else ROOT.parent / "workspace"
+
+
+DATA = _data_dir()
 PROJECTS = DATA / "projects"
 PROJECTS.mkdir(parents=True, exist_ok=True)
 
@@ -93,7 +104,7 @@ def run_transcribe(pid: str, model: str) -> None:
             p["device"] = device
         mutate(pid, apply)
         set_status(pid, "transcribe", state="done", progress=1,
-                   message=f"전사 완료 ({device.upper()}, {time.time() - t0:.0f}초)")
+                   message=f"받아쓰기 완료 ({device.upper()}, {time.time() - t0:.0f}초)")
     except Exception as e:
         traceback.print_exc()
         set_status(pid, "transcribe", state="error", error=str(e), message=str(e))
@@ -148,8 +159,103 @@ def index():
 @app.get("/api/system")
 def system():
     gpu = transcriber.gpu_available()
-    return jsonify(gpu=gpu, ffmpeg=media.ffmpeg_ok(), models=transcriber.MODELS,
+    hw = gpu or transcriber.gpu_hardware()
+    return jsonify(app="sophicut", version=__version__, gpu=gpu, gpu_hardware=hw,
+                   gpu_download_mb=transcriber.GPU_DOWNLOAD_MB, gpu_job=get_status("_app").get("gpu", {}),
+                   ffmpeg=media.ffmpeg_ok(), models=transcriber.MODELS,
                    default_model="large-v3-turbo" if gpu else "small")
+
+
+# ---------- app lifecycle: update check, GPU download, heartbeat, quit ----------
+_update_cache: dict = {}
+
+
+def _ver(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
+@app.get("/api/update")
+def check_update():
+    """Asks GitHub for the latest release (cached for an hour)."""
+    now = time.time()
+    if not _update_cache or now - _update_cache["t"] > 3600:
+        info = {"current": __version__, "latest": None, "available": False}
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
+                                         headers={"Accept": "application/vnd.github+json",
+                                                  "User-Agent": "SophiCut-update-check"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                rel = json.load(r)
+            latest = rel.get("tag_name", "").lstrip("v")
+            setup = next((a["browser_download_url"] for a in rel.get("assets", [])
+                          if a["name"].lower().endswith(".exe")), None)
+            info.update(latest=latest, available=_ver(latest) > _ver(__version__),
+                        url=setup or rel.get("html_url"), page=rel.get("html_url"),
+                        notes=(rel.get("body") or "")[:2000])
+        except Exception as e:  # offline, no release yet, ... -> just no banner
+            info["error"] = str(e)
+        _update_cache.update(t=now, info=info)
+    return jsonify(_update_cache["info"])
+
+
+def run_gpu_install() -> None:
+    def work():
+        set_status("_app", "gpu", state="running", progress=0, message="준비 중…", error=None)
+        try:
+            transcriber.install_gpu_libs(lambda f, m: set_status("_app", "gpu", progress=f, message=m))
+            set_status("_app", "gpu", state="done", progress=1, message="GPU 가속을 켰습니다.")
+        except Exception as e:
+            traceback.print_exc()
+            set_status("_app", "gpu", state="error", error=str(e), message=str(e))
+    threading.Thread(target=work, daemon=True).start()
+
+
+@app.post("/api/gpu/install")
+def gpu_install():
+    if get_status("_app").get("gpu", {}).get("state") == "running":
+        return jsonify(ok=True)
+    if not transcriber.gpu_hardware():
+        return jsonify(error="NVIDIA 그래픽카드를 찾지 못했습니다."), 400
+    run_gpu_install()
+    return jsonify(ok=True)
+
+
+@app.get("/api/gpu/status")
+def gpu_status():
+    return jsonify(get_status("_app").get("gpu", {}))
+
+
+_last_beat = {"t": None}
+
+
+@app.post("/api/heartbeat")
+def heartbeat():
+    _last_beat["t"] = time.time()
+    return jsonify(ok=True)
+
+
+def _busy() -> bool:
+    with _lock:
+        return any(j.get("state") == "running" for jobs in STATUS.values() for j in jobs.values())
+
+
+@app.post("/api/quit")
+def quit_app():
+    if _busy() and not (request.get_json(silent=True) or {}).get("force"):
+        return jsonify(error="아직 작업 중입니다(받아쓰기·내보내기). 끝난 뒤에 종료해 주세요."), 409
+    threading.Timer(0.5, lambda: os._exit(0)).start()
+    return jsonify(ok=True)
+
+
+def _watchdog(idle_limit: float = 180) -> None:
+    """Installed build has no console window: exit once no browser tab has pinged for a while."""
+    started = time.time()
+    while True:
+        time.sleep(15)
+        last = _last_beat["t"] or started
+        if time.time() - last > idle_limit and not _busy():
+            os._exit(0)
 
 
 @app.get("/api/projects")
@@ -357,7 +463,7 @@ def retranscribe(pid):
     if model not in transcriber.MODELS:
         abort(400)
     if get_status(pid).get("transcribe", {}).get("state") == "running":
-        return jsonify(error="이미 전사 중입니다."), 409
+        return jsonify(error="이미 받아쓰는 중입니다."), 409
     run_transcribe(pid, model)
     return jsonify(ok=True)
 
@@ -406,21 +512,58 @@ def reveal(pid):
     return jsonify(ok=True, path=str(d))
 
 
-def main():
-    port = int(os.environ.get("SOPHICUT_PORT", "7860"))
-    url = f"http://127.0.0.1:{port}"
-    if not media.ensure_ffmpeg():
-        print("\n  [오류] ffmpeg를 찾을 수 없습니다.\n"
-              "  명령 프롬프트에서 다음을 실행한 뒤 다시 시작해 주세요:\n"
-              "    winget install Gyan.FFmpeg\n")
-        return
+def _alert(msg: str) -> None:
+    print("\n  " + msg.replace("\n", "\n  ") + "\n")
+    if FROZEN and os.name == "nt":
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, msg, "소피컷", 0x40)
+
+
+def _probe_port(port: int) -> str:
+    """'free', 'sophicut' (already running) or 'busy' (another program)."""
     import socket
-    with socket.socket() as s:
-        if s.connect_ex(("127.0.0.1", port)) == 0:  # already running -> just open it
-            print(f"\n  소피컷이 이미 실행 중입니다 → {url}\n")
-            webbrowser.open(url)
+    import urllib.request
+    with socket.socket() as sk:
+        if sk.connect_ex(("127.0.0.1", port)) != 0:
+            return "free"
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=2) as r:
+            return "sophicut" if json.load(r).get("app") == "sophicut" else "busy"
+    except Exception:
+        return "busy"
+
+
+@app.get("/api/ping")
+def ping():
+    return jsonify(app="sophicut", version=__version__)
+
+
+def main():
+    if os.environ.get("SOPHICUT_PORT"):
+        ports = [int(os.environ["SOPHICUT_PORT"])]
+    else:
+        ports = list(range(7860, 7870))
+    if not media.ensure_ffmpeg():
+        _alert("ffmpeg를 찾을 수 없습니다.\n명령 프롬프트에서 다음을 실행한 뒤 다시 시작해 주세요:\n"
+               "    winget install Gyan.FFmpeg")
+        return
+    port = None
+    for p in ports:
+        state = _probe_port(p)
+        if state == "sophicut":  # already running -> just open it
+            print(f"\n  소피컷이 이미 실행 중입니다 → http://127.0.0.1:{p}\n")
+            webbrowser.open(f"http://127.0.0.1:{p}")
             return
-    print(f"\n  소피컷 실행 중 → {url}\n  (종료하려면 이 창에서 Ctrl+C)\n")
+        if state == "free":
+            port = p
+            break
+    if port is None:
+        _alert("소피컷을 시작할 빈 포트를 찾지 못했습니다. 컴퓨터를 다시 시작한 뒤 실행해 주세요.")
+        return
+    url = f"http://127.0.0.1:{port}"
+    print(f"\n  소피컷 {__version__} 실행 중 → {url}\n  (종료하려면 이 창에서 Ctrl+C)\n")
+    if FROZEN or os.environ.get("SOPHICUT_AUTO_EXIT"):
+        threading.Thread(target=_watchdog, daemon=True).start()
     if not os.environ.get("SOPHICUT_NO_BROWSER"):
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=port, threaded=True, debug=False, load_dotenv=False)

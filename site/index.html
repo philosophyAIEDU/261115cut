@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>소피컷 — 원고로 자르는 영상 편집기</title>
+<meta name="description" content="소피컷은 AI가 받아 적은 원고에서 말을 지우면 영상이 잘리는 무료 영상 편집기입니다. 설치 파일 하나로 바로 시작하세요.">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root {
+    --bg: #0d1210; --panel: #131a17; --panel2: #1a2320; --line: #25302c; --line2: #33403b;
+    --text: #e8efec; --soft: #c3cfca; --muted: #85968f;
+    --accent: #2ed3a2; --accent-ink: #062a1e; --accent-soft: rgba(46,211,162,.12);
+    --del: #ff6f61; --warn: #f2a93b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: Pretendard, -apple-system, "Malgun Gothic", sans-serif;
+    line-height: 1.7; font-size: 17px; word-break: keep-all; }
+  a { color: var(--accent); }
+  code { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: .9em; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px; }
+
+  header.top { position: sticky; top: 0; z-index: 10; background: rgba(13,18,16,.85); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; color: var(--text); text-decoration: none; }
+  .brand img { width: 30px; height: 30px; }
+  nav.links { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  nav.links a { color: var(--muted); text-decoration: none; }
+  nav.links a:hover { color: var(--text); }
+
+  .hero { padding: 76px 0 60px; }
+  .hero .split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: center; }
+  .hero h1 { font-size: clamp(32px, 5.4vw, 50px); line-height: 1.22; margin: 0 0 18px; font-weight: 800; letter-spacing: -1px; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .lead { color: var(--soft); font-size: 18px; margin: 0 0 30px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--accent); color: var(--accent-ink); text-decoration: none;
+    font-weight: 800; font-size: 18px; padding: 16px 28px; border-radius: 14px; box-shadow: 0 10px 30px rgba(46,211,162,.25); transition: transform .12s; }
+  .btn:hover { transform: translateY(-2px); }
+  .btn svg { width: 22px; height: 22px; }
+  .meta { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .meta b { color: var(--soft); font-weight: 600; }
+
+  /* little product illustration: manuscript with a struck-out phrase */
+  .demo { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 22px; box-shadow: 0 30px 60px rgba(0,0,0,.35); }
+  .demo .bar { height: 120px; border-radius: 12px; background: linear-gradient(135deg, #1f2d28, #10201a); margin-bottom: 16px; position: relative; overflow: hidden; }
+  .demo .bar span { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: rgba(0,0,0,.55); color: #fff; font-weight: 700; padding: 3px 12px; border-radius: 6px; font-size: 14px; white-space: nowrap; }
+  .demo .p { display: grid; grid-template-columns: 52px 1fr; gap: 8px; font-size: 15.5px; line-height: 1.9; padding: 4px 0; }
+  .demo .t { color: var(--muted); font-size: 11.5px; padding-top: 4px; text-align: right; font-variant-numeric: tabular-nums; }
+  .demo s { color: var(--del); background: rgba(255,111,97,.12); text-decoration-thickness: 2px; border-radius: 4px; padding: 0 2px; }
+  .demo .gap { font-size: 11px; color: var(--muted); border: 1px dashed var(--line2); border-radius: 999px; padding: 0 6px; }
+  .demo .on { border-left: 3px solid var(--accent); margin-left: -3px; }
+
+  .feats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 56px; }
+  .feat { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .feat b { display: block; margin-bottom: 4px; }
+  .feat span { color: var(--muted); font-size: 14.5px; line-height: 1.6; display: block; }
+
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 30px; margin: 0 0 8px; letter-spacing: -.5px; }
+  .desc { color: var(--muted); margin: 0 0 30px; }
+  h3 { font-size: 19px; margin: 0 0 6px; }
+
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 36px 66px; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: -2px; width: 44px; height: 44px; border-radius: 14px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 800; font-size: 19px; display: grid; place-items: center; }
+  ol.steps > li::after { content: ""; position: absolute; left: 21px; top: 50px; bottom: 8px; width: 2px; background: var(--line); }
+  ol.steps > li:last-child::after { display: none; }
+  ol.steps p { margin: 6px 0; color: var(--soft); }
+
+  .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin: 12px 0; font-size: 15px; }
+  .shot .ttl { font-weight: 700; margin-bottom: 8px; }
+  .win { background: #fff; color: #1b1b1b; border-radius: 8px; padding: 14px 16px; font-size: 14px; max-width: 440px; line-height: 1.6; }
+  .win.blue { background: #1f4e9c; color: #fff; }
+  .win .t { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  .win .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .win .wb { border: 1px solid #999; padding: 3px 14px; border-radius: 3px; font-size: 13px; }
+  .win.blue .wb { border-color: #fff; }
+  .hl { outline: 3px solid var(--warn); outline-offset: 2px; border-radius: 2px; }
+  .note { border-left: 4px solid var(--warn); background: rgba(242,169,59,.08); padding: 12px 16px; border-radius: 0 12px 12px 0; margin: 12px 0; font-size: 15px; color: var(--soft); }
+  .note.ok { border-color: var(--accent); background: var(--accent-soft); }
+  kbd { background: var(--panel2); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 5px; padding: 0 7px; font-family: inherit; font-size: 14px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .card .n { color: var(--accent); font-weight: 800; font-size: 13px; }
+  .card p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+
+  .update { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .update .card h3 { font-size: 17px; }
+
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 0 18px; margin-bottom: 10px; }
+  summary { cursor: pointer; padding: 16px 0; font-weight: 700; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "+"; display: inline-block; width: 18px; color: var(--accent); font-weight: 800; }
+  details[open] summary::before { content: "–"; }
+  details > div { padding: 0 0 16px 18px; color: var(--soft); font-size: 16px; }
+  details p { margin: 0 0 8px; }
+
+  footer { border-top: 1px solid var(--line); padding: 32px 0 54px; color: var(--muted); font-size: 14px; text-align: center; }
+
+  @media (max-width: 760px) {
+    body { font-size: 16px; }
+    nav.links { display: none; }
+    .hero { padding: 44px 0 40px; }
+    .hero .split { grid-template-columns: 1fr; }
+    .feats { grid-template-columns: 1fr 1fr; }
+    .grid3, .update { grid-template-columns: 1fr; }
+    ol.steps > li { padding-left: 58px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="logo.svg" alt="">소피컷</a>
+    <nav class="links">
+      <a href="#install">설치</a>
+      <a href="#use">사용법</a>
+      <a href="#update">업데이트</a>
+      <a href="#faq">도움말</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap split">
+      <div>
+        <h1>말한 대로 쓰고,<br><em>쓴 대로 자릅니다.</em></h1>
+        <p class="lead">영상을 넣으면 AI가 원고를 받아 적습니다. 원고에서 필요 없는 말을 지우면, 그 부분이 영상에서도 잘려 나갑니다.</p>
+        <a class="btn" id="dl" href="https://github.com/philosophyAIEDU/261115cut/releases/latest/download/SophiCut-Setup.exe">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          무료로 내려받기
+        </a>
+        <div class="meta">Windows 10 / 11 · <span id="ver">최신 버전</span> · 설치 파일 하나로 끝</div>
+      </div>
+      <div class="demo" aria-hidden="true">
+        <div class="bar"><span>쓸데없는 말은 빼고</span></div>
+        <div class="p on"><span class="t">00:04.2</span><span>오늘은 <s>음</s> 영상 편집을 <s>그러니까 어</s> 쉽게 하는 법을</span></div>
+        <div class="p"><span class="t">00:09.8</span><span><span class="gap">1.6초</span> 알려 드리겠습니다</span></div>
+        <div class="p"><span class="t">00:12.1</span><span><s>잠깐만요 다시 할게요</s></span></div>
+      </div>
+    </div>
+    <div class="wrap">
+      <div class="feats">
+        <div class="feat"><b>✂ 글자를 지우면 컷</b><span>타임라인을 몰라도 원고만 보고 자릅니다.</span></div>
+        <div class="feat"><b>⋯ 빈틈·추임새 정리</b><span>말 없는 구간과 "음, 어"를 한 번에.</span></div>
+        <div class="feat"><b>◆ 자막 자동 생성</b><span>원고가 그대로 자막이 되고, 스타일도 고릅니다.</span></div>
+        <div class="feat"><b>🔒 내 컴퓨터에서만</b><span>영상은 인터넷으로 올라가지 않습니다.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>설치하기</h2>
+      <p class="desc">보통 프로그램처럼 설치합니다. 따로 깔아야 할 것은 없습니다.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>설치 파일 내려받기</h3>
+          <p>위의 <b>「무료로 내려받기」</b>를 누르면 <code>SophiCut-Setup.exe</code>가 <b>다운로드</b> 폴더에 저장됩니다.</p>
+          <div class="note">브라우저가 <b>"일반적으로 다운로드되지 않는 파일"</b>이라고 하면, 파일 옆 <b>⋯</b> → <b>유지</b> → <b>그래도 계속</b>을 누르세요. 새로 나온 프로그램이라 뜨는 안내입니다.</div>
+        </li>
+
+        <li>
+          <h3>설치 파일 실행하기</h3>
+          <p>다운로드 폴더에서 <code>SophiCut-Setup.exe</code>를 더블클릭하세요. 파란 창이 뜨면 이렇게 누릅니다.</p>
+          <div class="shot">
+            <div class="ttl">「Windows의 PC 보호」 창이 뜨면</div>
+            <div class="win blue">
+              <div class="t">Windows의 PC 보호</div>
+              Microsoft Defender SmartScreen에서 인식할 수 없는 앱의 시작을 차단했습니다…<br>
+              <span class="hl"><u>추가 정보</u></span> ← ① 이것을 누르고
+              <div class="row"><span class="wb hl">실행</span><span class="wb">실행 안 함</span></div>
+            </div>
+            <p style="margin:10px 0 0">② 새로 나타난 <b>「실행」</b> 버튼을 누릅니다.</p>
+          </div>
+        </li>
+
+        <li>
+          <h3>설치 마법사 따라가기</h3>
+          <p><b>다음</b> → <b>설치</b> → <b>마침</b>을 차례로 누르면 됩니다. 관리자 권한은 필요 없습니다.</p>
+          <p><b>「바탕화면에 소피컷 아이콘 만들기」</b>에 체크해 두면 다음부터 찾기 쉽습니다.</p>
+        </li>
+
+        <li>
+          <h3>소피컷 실행</h3>
+          <p>바탕화면(또는 시작 메뉴)의 <b>소피컷</b>을 더블클릭하면, 인터넷 브라우저에 소피컷 화면이 열립니다. 브라우저에서 열리지만 <b>내 컴퓨터 안에서만</b> 동작합니다.</p>
+          <div class="note ok">처음 영상을 넣으면 받아쓰기 AI를 한 번 내려받느라 몇 분 걸립니다. 다음부터는 바로 시작됩니다.</div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="use">
+    <div class="wrap">
+      <h2>3분 사용법</h2>
+      <p class="desc">영상 넣기 → 원고 다듬기 → 완성본 만들기, 이것만 알면 됩니다.</p>
+      <div class="grid3">
+        <div class="card"><div class="n">1</div><h3>영상 넣기</h3><p>첫 화면에 영상 파일을 끌어다 놓으세요. AI가 말을 원고로 받아 적습니다.</p></div>
+        <div class="card"><div class="n">2</div><h3>지울 말 고르기</h3><p>원고에서 단어를 마우스로 끌어 고르고 <kbd>Delete</kbd>. 한 번 더 누르면 되살아납니다.</p></div>
+        <div class="card"><div class="n">3</div><h3>한 번에 정리</h3><p><b>다듬기</b> 도구의 <b>빈틈 정리</b>와 <b>추임새 지우기</b>로 군더더기를 걷어 냅니다.</p></div>
+        <div class="card"><div class="n">4</div><h3>자막 꾸미기</h3><p><b>자막</b> 도구에서 굵기·색·테두리·배경을 바꾸거나 준비된 스타일을 고릅니다.</p></div>
+        <div class="card"><div class="n">5</div><h3>이미지·속도</h3><p><b>이미지</b> 도구로 사진을 얹고, <b>속도</b> 도구로 지루한 부분을 빠르게 넘깁니다.</p></div>
+        <div class="card"><div class="n">6</div><h3>완성본 만들기</h3><p>오른쪽 위 <b>완성본 만들기</b>에서 영상+자막, 영상만, 자막 파일(SRT), 원고(TXT)를 고릅니다.</p></div>
+      </div>
+      <p class="desc" style="margin-top:20px;font-size:15px"><kbd>Space</kbd> 재생 · <kbd>Ctrl</kbd>+<kbd>Z</kbd> 되돌리기 · <kbd>Enter</kbd> 문단 나누기 · <kbd>더블클릭</kbd> 글자 고치기</p>
+      <div class="note ok"><b>다 쓰고 나면</b> 오른쪽 위 <b>「종료」</b>를 누르세요. 그냥 브라우저 탭을 닫아도 몇 분 뒤 저절로 꺼집니다. 작업은 자동 저장됩니다.</div>
+    </div>
+  </section>
+
+  <section id="update">
+    <div class="wrap">
+      <h2>새 버전 받기</h2>
+      <p class="desc">소피컷은 계속 좋아집니다. 업데이트는 두 가지 방법 중 편한 쪽으로 하세요.</p>
+      <div class="update">
+        <div class="card"><h3>✦ 소피컷이 알려 줄 때</h3><p>새 버전이 나오면 소피컷 첫 화면 위쪽에 <b>「새 버전이 나왔습니다」</b> 알림이 뜹니다. <b>새 버전 받기</b>를 눌러 받은 파일을 실행하면 끝입니다.</p></div>
+        <div class="card"><h3>⬇ 이 사이트에서</h3><p>언제든 이 페이지의 <b>「무료로 내려받기」</b>로 최신 설치 파일을 받아 실행하면 됩니다. 설치 방법은 처음과 같습니다.</p></div>
+      </div>
+      <div class="note ok">업데이트해도 <b>작업하던 프로젝트와 저장한 자막 스타일은 그대로</b> 남습니다. 지우고 다시 설치할 필요 없이 덮어서 설치하면 됩니다.</div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>도움말</h2>
+      <p class="desc">막히는 부분이 있으면 여기부터 확인해 보세요.</p>
+
+      <details><summary>컴퓨터 사양이 어느 정도 필요한가요?</summary><div>
+        <p>Windows 10/11 64비트, 메모리 8GB 이상, 여유 공간 5GB 이상을 권장합니다. 인터넷은 설치하고 처음 받아쓰기 AI를 내려받을 때만 씁니다.</p></div></details>
+
+      <details><summary>받아쓰기가 너무 느려요</summary><div>
+        <p><b>NVIDIA 그래픽카드가 있다면</b> 소피컷 첫 화면에 <b>「GPU 가속 받기」</b>가 보입니다. 한 번 받아 두면(약 1.3GB) 받아쓰기가 몇 배 빨라집니다.</p>
+        <p>그래픽카드가 없다면 영상을 넣기 전에 <b>받아쓰기 AI</b>를 <b>「가벼움」</b>으로 바꿔 보세요. 정확도는 조금 낮아지지만 훨씬 빠릅니다.</p></div></details>
+
+      <details><summary>소피컷을 눌렀는데 화면이 안 열려요</summary><div>
+        <p>브라우저 주소창에 <code>http://127.0.0.1:7860</code>을 입력해 보세요. 그래도 안 되면 컴퓨터를 다시 시작한 뒤 소피컷을 실행하세요.</p></div></details>
+
+      <details><summary>완성본(영상 파일)은 어디에 저장되나요?</summary><div>
+        <p>완성본이 나오면 <b>「저장하기」</b>로 원하는 곳에 받거나, <b>「폴더 열기」</b>로 저장된 폴더를 바로 열 수 있습니다.</p></div></details>
+
+      <details><summary>백신 프로그램이 설치 파일을 막아요</summary><div>
+        <p>새로 나온 프로그램이라 일부 백신이 조심스럽게 막는 경우가 있습니다. 이 사이트나 공식 GitHub에서 받은 파일이 맞다면 백신의 「허용」 또는 「예외」에 추가해 주세요.</p></div></details>
+
+      <details><summary>내 영상이 인터넷으로 전송되나요?</summary><div>
+        <p>아니요. 받아쓰기를 포함한 모든 작업이 내 컴퓨터 안에서만 이루어집니다.</p></div></details>
+
+      <details><summary>지우고 싶어요</summary><div>
+        <p><b>설정 → 앱 → 설치된 앱</b>에서 <b>소피컷</b>을 찾아 <b>제거</b>하세요. 작업하던 프로젝트까지 모두 지우려면 파일 탐색기 주소창에 <code>%LOCALAPPDATA%\SophiCut</code>을 입력해 열린 폴더를 지우면 됩니다.</p></div></details>
+
+      <details><summary>Mac에서도 되나요?</summary><div>
+        <p>지금은 Windows만 지원합니다. 개발에 익숙하다면 <a href="https://github.com/philosophyAIEDU/261115cut">GitHub 저장소</a>의 안내대로 소스에서 직접 실행할 수 있습니다.</p></div></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    소피컷 · 필로소피 AI 교육 · <a href="https://github.com/philosophyAIEDU/261115cut">GitHub</a> · <a href="https://github.com/philosophyAIEDU/261115cut/releases">모든 버전</a><br>
+    자막 글꼴 Pretendard (SIL OFL) · 음성 인식 faster-whisper · 영상 처리 FFmpeg
+  </div>
+</footer>
+
+<script>
+  // Show the latest version number and size from GitHub Releases (falls back silently).
+  fetch("https://api.github.com/repos/philosophyAIEDU/261115cut/releases/latest")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((rel) => {
+      if (!rel || !rel.tag_name) return;
+      const exe = (rel.assets || []).find((a) => /\.exe$/i.test(a.name));
+      const date = new Date(rel.published_at).toLocaleDateString("ko-KR");
+      document.getElementById("ver").innerHTML =
+        `최신 <b>v${rel.tag_name.replace(/^v/, "")}</b> (${date})` + (exe ? ` · ${Math.round(exe.size / 1048576)}MB` : "");
+      if (exe) document.getElementById("dl").href = exe.browser_download_url;
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

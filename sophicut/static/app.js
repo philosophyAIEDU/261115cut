@@ -40,28 +40,77 @@ function modal(title, text, pct, actions = []) {
 const closeModal = () => ($("modal").hidden = true);
 
 /* ================= home ================= */
+const MODEL_LABEL = {
+  "large-v3-turbo": "정확하고 빠름 (추천)", "large-v3": "가장 정확함 (느림)", medium: "보통",
+  small: "가벼움 (그래픽카드 없을 때 추천)", base: "가장 가벼움",
+};
 async function initHome() {
   try {
     const sys = await api("/api/system");
+    const cur = $("modelSel").value;
     $("modelSel").innerHTML = sys.models.map((m) =>
-      `<option value="${m}" ${m === sys.default_model ? "selected" : ""}>${m}${m === "large-v3-turbo" ? " (추천)" : ""}</option>`).join("");
-    $("sysInfo").textContent = `${sys.gpu ? "GPU 가속 사용" : "CPU 모드 (GPU 없음)"}${sys.ffmpeg ? "" : " · ⚠ ffmpeg 없음"}`;
+      `<option value="${m}" ${m === (cur || sys.default_model) ? "selected" : ""}>${MODEL_LABEL[m] || m} · ${m}</option>`).join("");
+    $("sysInfo").textContent = `${sys.gpu ? "⚡ GPU로 받아쓰기" : "CPU로 받아쓰기"}${sys.ffmpeg ? "" : " · ⚠ ffmpeg 없음"}`;
+    $("verText").textContent = `v${sys.version}`;
+    $("gpuBanner").hidden = !(sys.gpu_hardware && !sys.gpu);
+    $("gpuText").textContent = `GPU 가속 파일(약 ${(sys.gpu_download_mb / 1000).toFixed(1)}GB)을 한 번 받으면 받아쓰기가 몇 배 빨라집니다.`;
+    if (sys.gpu_job?.state === "running") watchGpu();
   } catch (e) { $("sysInfo").textContent = e.message; }
   loadRecent();
+  checkUpdate();
 }
+async function checkUpdate() {
+  try {
+    const u = await api("/api/update");
+    if (!u.available) return;
+    $("updateTitle").textContent = `새 버전 ${u.latest}이 나왔습니다 (지금 ${u.current})`;
+    $("updateLink").href = u.url; $("updateBanner").hidden = false;
+  } catch {}
+}
+$("gpuBtn").onclick = async () => {
+  try { await api("/api/gpu/install", { method: "POST" }); watchGpu(); } catch (e) { toast(e.message, 4000); }
+};
+function watchGpu() {
+  $("gpuBtn").disabled = true; $("gpuBarBox").hidden = false;
+  const t = setInterval(async () => {
+    const st = await api("/api/gpu/status").catch(() => ({}));
+    $("gpuBar").style.width = `${Math.round((st.progress || 0) * 100)}%`;
+    if (st.message) $("gpuText").textContent = st.message;
+    if (st.state === "running") return;
+    clearInterval(t); $("gpuBtn").disabled = false;
+    if (st.state === "done") { toast("GPU 가속을 켰습니다. 이제 받아쓰기가 빨라집니다.", 4000); $("gpuBanner").hidden = true; initHome(); }
+    else if (st.state === "error") { $("gpuBarBox").hidden = true; $("gpuBtn").textContent = "다시 시도"; }
+  }, 1000);
+}
+
+/* ================= heartbeat / quit ================= */
+const beat = () => fetch("/api/heartbeat", { method: "POST" }).catch(() => {});
+beat(); setInterval(beat, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) beat(); });
+$("quitBtn").onclick = async () => {
+  if (!confirm("소피컷을 종료할까요?")) return;
+  if (S.pid) await saveNow();
+  let r = await fetch("/api/quit", jsonOpt("POST", {}));
+  if (r.status === 409) {
+    const j = await r.json().catch(() => ({}));
+    if (!confirm(`${j.error}\n\n그래도 지금 종료할까요?`)) return;
+    r = await fetch("/api/quit", jsonOpt("POST", { force: true }));
+  }
+  $("byeScreen").hidden = false;
+};
 async function loadRecent() {
   const list = await api("/api/projects").catch(() => []);
   const ul = $("recentList");
-  if (!list.length) { ul.innerHTML = `<li class="empty">아직 프로젝트가 없습니다.</li>`; return; }
+  if (!list.length) { ul.innerHTML = `<li class="empty">아직 작업이 없어요. 왼쪽에 영상을 넣어 시작하세요.</li>`; return; }
   ul.innerHTML = "";
   for (const p of list) {
     const li = document.createElement("li");
-    li.innerHTML = `<span class="n"></span><span class="m">${fmt(p.duration)} · ${new Date(p.created * 1000).toLocaleString()}${p.transcribed ? "" : " · 전사 전"}</span><button class="x" title="삭제">✕</button>`;
+    li.innerHTML = `<span class="n"></span><span class="m">${fmt(p.duration)} · ${new Date(p.created * 1000).toLocaleString()}${p.transcribed ? "" : " · 받아쓰기 전"}</span><button class="x" title="삭제">✕</button>`;
     li.querySelector(".n").textContent = p.name;
     li.onclick = () => openProject(p.id);
     li.querySelector(".x").onclick = async (ev) => {
       ev.stopPropagation();
-      if (!confirm(`'${p.name}' 프로젝트를 삭제할까요?`)) return;
+      if (!confirm(`'${p.name}' 작업을 지울까요? 원본 영상 파일은 지워지지 않습니다.`)) return;
       await api(`/api/projects/${p.id}`, { method: "DELETE" }); loadRecent();
     };
     ul.appendChild(li);
@@ -93,17 +142,24 @@ document.addEventListener("drop", (e) => e.preventDefault());
 function showHome() {
   stopPoll(); S.pid = null; $("video").removeAttribute("src"); $("video").load();
   $("editor").hidden = true; $("ribbon").hidden = true; $("tabs").hidden = true; $("home").hidden = false;
-  $("editorActions").hidden = true; $("projTitle").textContent = "";
+  $("editorActions").hidden = true; $("docInfo").hidden = true; $("projTitle").textContent = "";
   history.replaceState(null, "", "/"); loadRecent();
 }
-$("goHome").onclick = showHome;
+$("goHome").onclick = () => { if (S.pid) saveNow(); showHome(); initHome(); };
 
 /* ================= tabs ================= */
-$("tabs").addEventListener("click", (e) => {
-  const tab = e.target.dataset.tab; if (!tab) return;
+function openTab(tab) {
   $("tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   document.querySelectorAll(".rpanel").forEach((p) => (p.hidden = p.dataset.panel !== tab));
-  $("presetPop").hidden = true;
+  $("presetPop").hidden = true; $("editor").classList.remove("closed");
+  requestAnimationFrame(fitPlayer);
+}
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  if (b.classList.contains("on") && !$("editor").classList.contains("closed")) {  // click again: fold the drawer
+    $("editor").classList.add("closed"); requestAnimationFrame(fitPlayer); return;
+  }
+  openTab(b.dataset.tab);
 });
 
 /* ================= project ================= */
@@ -113,7 +169,7 @@ async function openProject(pid) {
   S.style = project.style; S.overlays = project.overlays || [];
   setClips(project.clips || []);
   $("home").hidden = true; $("editor").hidden = false; $("ribbon").hidden = false; $("tabs").hidden = false;
-  $("editorActions").hidden = false;
+  $("editorActions").hidden = false; $("docInfo").hidden = false;
   $("projTitle").textContent = project.name; history.replaceState(null, "", `#${pid}`);
   $("saveState").textContent = "";
   loadVideo(); fitPlayer(); syncStyleControls(); render(); renderOverlays(); updateSpeedInfo(); handleStatus(status); startPoll();
@@ -130,7 +186,7 @@ function loadVideo() {
 function fitPlayer() {
   if (!S.project) return;
   const m = S.project.meta, ar = m.width && m.height ? m.width / m.height : 16 / 9;
-  const col = $("leftCol"), cw = col.clientWidth - 28, maxH = Math.max(220, window.innerHeight * 0.52);
+  const col = $("leftCol"), cw = col.clientWidth - 32, maxH = Math.max(200, window.innerHeight * (innerWidth > 1180 ? 0.56 : 0.38));
   const w = Math.min(cw, maxH * ar);
   Object.assign($("player").style, { width: `${w}px`, height: `${w / ar}px`, aspectRatio: "auto" });
   drawTimeline();
@@ -152,13 +208,13 @@ async function handleStatus(st) {
   const box = $("statusBox");
   if (tr.state === "running") {
     box.hidden = false; $("statusBar").style.width = `${Math.round((tr.progress || 0) * 100)}%`;
-    $("statusText").textContent = `${tr.message || "전사 중…"} (${Math.round((tr.progress || 0) * 100)}%)`;
+    $("statusText").textContent = `${tr.message || "받아쓰는 중…"} (${Math.round((tr.progress || 0) * 100)}%)`;
   } else if (tr.state === "error") {
     box.hidden = false; $("statusBar").style.width = "0";
     $("statusText").innerHTML = ""; $("statusText").append(`⚠ ${tr.error} `); $("statusText").appendChild(retryButton());
   } else if (!S.project.transcribed && tr.state !== "done") {
     box.hidden = false; $("statusBar").style.width = "0";
-    $("statusText").innerHTML = "아직 전사되지 않았습니다. "; $("statusText").appendChild(retryButton("전사 시작"));
+    $("statusText").innerHTML = "아직 받아쓰기 전입니다. "; $("statusText").appendChild(retryButton("받아쓰기 시작"));
   } else box.hidden = true;
 
   if (tr.state === "done" && lastTranscribeState === "running") {
@@ -172,11 +228,11 @@ async function handleStatus(st) {
   if (pv.state === "done" && !S.project.preview) { S.project.preview = "preview.mp4"; loadVideo(); }
 
   if (ex.state === "running" && S.exporting) {
-    modal("영상 내보내는 중", ex.progress >= 0.6 && ex.progress < 0.62 ? "자막과 이미지를 입히는 중…" : "삭제한 구간을 잘라내고 이어 붙이고 있습니다.", ex.progress);
+    modal("완성본 만드는 중", ex.progress >= 0.6 && ex.progress < 0.62 ? "자막과 이미지를 입히는 중…" : "자른 부분을 빼고 이어 붙이는 중입니다.", ex.progress);
   } else if (ex.state && ex.state !== "running" && S.exporting) {
     S.exporting = false;
     if (ex.state === "done") exportDone(ex.file);
-    else modal("내보내기 실패", ex.error, null, [["닫기", closeModal, true]]);
+    else modal("완성본을 만들지 못했어요", ex.error, null, [["닫기", closeModal, true]]);
   }
 }
 function retryButton(label = "다시 시도") {
@@ -242,7 +298,7 @@ function toggleDeleteClips(idxs) {
 }
 function splitAt(i) {
   const t = S.flat[i], clip = S.clips[t._c], k = clip.tokens.indexOf(t);
-  if (k <= 0) return toast("클립의 첫 단어에서는 나눌 수 없습니다.");
+  if (k <= 0) return toast("문단의 첫 단어에서는 나눌 수 없어요.");
   pushUndo();
   const rest = clip.tokens.splice(k);
   rest[0].space = true;
@@ -251,8 +307,8 @@ function splitAt(i) {
 }
 function mergeClips(idxs) {
   idxs = [...new Set(idxs)].sort((a, b) => a - b);
-  if (idxs.length < 2) return toast("합칠 클립을 2개 이상 선택하세요.");
-  for (let k = 1; k < idxs.length; k++) if (idxs[k] !== idxs[k - 1] + 1) return toast("붙어 있는 클립만 합칠 수 있습니다.");
+  if (idxs.length < 2) return toast("붙일 문단을 2개 이상 체크하세요.");
+  for (let k = 1; k < idxs.length; k++) if (idxs[k] !== idxs[k - 1] + 1) return toast("서로 이어진 문단만 붙일 수 있어요.");
   pushUndo();
   const first = S.clips[idxs[0]];
   for (const ci of idxs.slice(1)) first.tokens.push(...S.clips[ci].tokens);
@@ -263,50 +319,46 @@ const clipSpeed = (c) => Math.min(4, Math.max(0.5, +c.speed || 1));
 const keptDuration = () => S.flat.reduce((acc, t) => acc + (t.deleted ? 0 : (t.end - t.start) / clipSpeed(S.clips[t._c])), 0);
 const clipRange = (c) => [c.tokens[0].start, c.tokens[c.tokens.length - 1].end];
 
-/* ================= clip list render ================= */
+/* ================= manuscript render ================= */
 function render() {
   const box = $("script"), scroll = box.scrollTop;
   box.innerHTML = "";
   const frag = document.createDocumentFragment();
-  const hasVideo = S.project?.meta?.has_video;
   S.clips.forEach((c, ci) => {
     const [cs, ce] = clipRange(c);
     const row = document.createElement("div");
-    row.className = "clip" + (c.tokens.every((t) => t.deleted) ? " alldel" : "") + (S.checked.has(ci) ? " checked" : "");
+    row.className = "para" + (c.tokens.every((t) => t.deleted) ? " alldel" : "") + (S.checked.has(ci) ? " checked" : "");
     row.dataset.c = ci;
-    const ck = document.createElement("label"); ck.className = "ck";
-    ck.innerHTML = `<input type="checkbox" ${S.checked.has(ci) ? "checked" : ""}>`;
-    const no = document.createElement("div"); no.className = "no"; no.textContent = ci + 1;
+    const gut = document.createElement("div"); gut.className = "gut";
+    gut.innerHTML = `<span class="tc" title="${(ce - cs).toFixed(1)}초">${fmt(cs)}</span>`
+      + `<label class="ck" title="문단 고르기"><input type="checkbox" ${S.checked.has(ci) ? "checked" : ""}></label>`;
     const chips = document.createElement("div"); chips.className = "chips";
     if (clipSpeed(c) !== 1) {
-      const b = document.createElement("span"); b.className = "chip spd"; b.title = "배속 효과 (효과 탭에서 변경)";
-      b.textContent = `⏩ ${clipSpeed(c)}x`; chips.appendChild(b);
+      const b = document.createElement("span"); b.className = "chip spd"; b.title = "이 문단의 속도 (눌러서 바꾸기)";
+      b.textContent = `${clipSpeed(c)}배`; chips.appendChild(b);
     }
     for (const o of S.overlays) {
       if (o.start < ce && o.end > cs && o.start >= cs - 0.001) {
-        const b = document.createElement("span"); b.className = "chip img"; b.dataset.ov = o.id; b.textContent = "🖼 이미지";
+        const b = document.createElement("span"); b.className = "chip img"; b.dataset.ov = o.id; b.textContent = "이미지";
         chips.appendChild(b);
       }
     }
     for (const t of c.tokens) {
       const sp = document.createElement("span");
       sp.dataset.i = t._i;
-      if (t.type === "gap") { sp.className = "chip gap"; sp.textContent = `⏸ ${(t.end - t.start).toFixed(1)}초`; }
+      if (t.type === "gap") { sp.className = "chip gap"; sp.textContent = `${(t.end - t.start).toFixed(1)}초`; sp.title = "말이 없는 구간"; }
       else {
         const low = t.prob != null && t.prob < 0.45;
         sp.className = "chip word" + (low ? " low" : ""); sp.textContent = t.text;
-        if (low) sp.title = "AI가 확신하지 못한 단어입니다. 더블클릭으로 수정하세요.";
+        if (low) sp.title = "AI가 잘 못 알아들었을 수 있어요. 더블클릭해서 고치세요.";
       }
       if (t.deleted) sp.classList.add("del");
       chips.appendChild(sp);
     }
-    const side = document.createElement("div"); side.className = "side";
-    side.innerHTML = (hasVideo ? `<img class="thumb" loading="lazy" src="/api/projects/${S.pid}/thumb?t=${(cs + Math.min(0.3, (ce - cs) / 2)).toFixed(1)}" alt="">` : "")
-      + `<div class="tm">${fmt(cs)} · ${(ce - cs).toFixed(1)}초</div>`;
-    row.append(ck, no, chips, side); frag.appendChild(row);
+    row.append(gut, chips); frag.appendChild(row);
   });
   box.appendChild(frag); box.scrollTop = scroll;
-  $("clipCount").textContent = `클립 ${S.clips.length}개`;
+  $("clipCount").textContent = `문단 ${S.clips.length}개`;
   paintSel(); updateCheckUI(); updateLen(); drawTimeline(); applySearch(); nowIdx = -1; highlightNow();
 }
 const tokEl = (i) => $("script").querySelector(`.chip[data-i="${i}"]`);
@@ -316,7 +368,7 @@ function paintSel() {
   for (let i = r[0]; i <= r[1]; i++) tokEl(i)?.classList.add("sel");
 }
 function updateLen() {
-  $("lenText").textContent = `편집 후 ${fmt(keptDuration())} / 원본 ${fmt(S.project?.meta?.duration || 0)}`;
+  $("lenText").innerHTML = `완성 <b>${fmt(keptDuration())}</b><br>원본 ${fmt(S.project?.meta?.duration || 0)}`;
 }
 function updateCheckUI() {
   const n = S.checked.size;
@@ -357,9 +409,9 @@ script.addEventListener("dblclick", (e) => {
 });
 script.addEventListener("change", (e) => {
   if (!e.target.matches(".ck input")) return;
-  const ci = +e.target.closest(".clip").dataset.c;
+  const ci = +e.target.closest(".para").dataset.c;
   e.target.checked ? S.checked.add(ci) : S.checked.delete(ci);
-  e.target.closest(".clip").classList.toggle("checked", e.target.checked);
+  e.target.closest(".para").classList.toggle("checked", e.target.checked);
   updateCheckUI();
 });
 $("checkAll").onchange = (e) => {
@@ -415,29 +467,29 @@ $("delSelBtn").onclick = () => {
   const r = selRange();
   if (r) toggleDelete(r[0], r[1]);
   else if (S.checked.size) toggleDeleteClips([...S.checked]);
-  else toast("먼저 단어나 클립을 선택하세요.");
+  else toast("먼저 원고에서 단어를 고르거나 문단을 체크하세요.");
 };
-$("splitBtn").onclick = () => { const r = selRange(); r ? splitAt(r[0]) : toast("나눌 위치의 단어를 클릭하세요."); };
+$("splitBtn").onclick = () => { const r = selRange(); r ? splitAt(r[0]) : toast("나눌 자리의 단어를 클릭하세요."); };
 $("mergeBtn").onclick = () => {
   if (S.checked.size >= 2) return mergeClips([...S.checked]);
   const r = selRange();
   if (r) { const a = S.flat[r[0]]._c, b = S.flat[r[1]]._c; if (a !== b) return mergeClips(range(a, b)); if (a > 0) return mergeClips([a - 1, a]); }
-  toast("클립을 체크하거나, 여러 클립에 걸쳐 단어를 선택하세요.");
+  toast("문단을 체크하거나, 여러 문단에 걸쳐 단어를 고르세요.");
 };
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 $("silenceBtn").onclick = () => {
   const min = +$("silenceSel").value;
   const targets = S.flat.filter((t) => t.type === "gap" && !t.deleted && t.end - t.start >= min);
-  if (!targets.length) return toast(`${min}초 이상의 무음이 없습니다.`);
+  if (!targets.length) return toast(`${min}초 이상 말이 없는 곳이 없어요.`);
   pushUndo(); targets.forEach((t) => (t.deleted = true)); commit();
-  toast(`무음 ${targets.length}곳 삭제 (${targets.reduce((a, t) => a + t.end - t.start, 0).toFixed(1)}초)`);
+  toast(`빈틈 ${targets.length}곳 정리 (${targets.reduce((a, t) => a + t.end - t.start, 0).toFixed(1)}초)`);
 };
 $("fillerBtn").onclick = () => {
   const norm = (s) => s.replace(/[.,!?~…\s]/g, "");
   const targets = S.flat.filter((t) => t.type === "word" && !t.deleted && FILLERS.has(norm(t.text)));
-  if (!targets.length) return toast("군말을 찾지 못했습니다.");
+  if (!targets.length) return toast("추임새를 찾지 못했어요.");
   pushUndo(); targets.forEach((t) => (t.deleted = true)); commit();
-  toast(`군말 ${targets.length}개 삭제`);
+  toast(`추임새 ${targets.length}개 지움`);
 };
 $("restoreBtn").onclick = () => {
   if (!S.flat.some((t) => t.deleted)) return;
@@ -540,20 +592,20 @@ $("presetBtn").onclick = async (e) => {
     tile.append(sample);
     tile.insertAdjacentHTML("beforeend", `<span class="nm"></span>`); tile.querySelector(".nm").textContent = p.name;
     if (!p.builtin) {
-      const x = document.createElement("button"); x.className = "x"; x.textContent = "✕"; x.title = "서식 삭제";
+      const x = document.createElement("button"); x.className = "x"; x.textContent = "✕"; x.title = "스타일 지우기";
       x.onclick = async (ev) => { ev.stopPropagation(); await api(`/api/presets/${p.id}`, { method: "DELETE" }); pop.hidden = true; $("presetBtn").click(); };
       tile.append(x);
     }
     tile.onclick = () => {
       const keep = { posY: S.style.posY, maxChars: S.style.maxChars };
-      S.style = { ...structuredClone(p.style), ...keep }; pop.hidden = true; styleChanged(); toast(`'${p.name}' 서식 적용`);
+      S.style = { ...structuredClone(p.style), ...keep }; pop.hidden = true; styleChanged(); toast(`'${p.name}' 스타일 적용`);
     };
     pop.appendChild(tile);
   }
-  const add = document.createElement("div"); add.className = "preset add"; add.innerHTML = "<b>+</b>현재 서식 저장";
+  const add = document.createElement("div"); add.className = "preset add"; add.innerHTML = "<b>+</b>지금 스타일 저장";
   add.onclick = async () => {
-    const name = prompt("서식 이름", "내 서식"); if (!name) return;
-    await api("/api/presets", jsonOpt("POST", { name, style: S.style })); toast("서식을 저장했습니다.");
+    const name = prompt("스타일 이름", "내 스타일"); if (!name) return;
+    await api("/api/presets", jsonOpt("POST", { name, style: S.style })); toast("스타일을 저장했어요.");
     pop.hidden = true;
   };
   pop.appendChild(add);
@@ -608,7 +660,7 @@ $("imgInput").onchange = async (e) => {
     const o = { id: uid(), file: j.file, start, end, x: 0.5, y: 0.42, w: +w.toFixed(3), opacity: 1, ar: imgAr };
     S.overlays.push(o);
     commit(); selectOverlay(o.id, true);
-    toast(`이미지를 ${fmt(start)}~${fmt(end)} 구간에 넣었습니다.`);
+    toast(`이미지를 ${fmt(start)}~${fmt(end)}에 넣었어요.`);
   } catch (err) { toast(err.message || "이미지를 넣지 못했습니다.", 4000); }
 };
 function renderOverlays() {
@@ -636,7 +688,7 @@ function selectOverlay(id, seekTo = false) {
   if (o) {
     $("ovW").value = o.w; $("ovOp").value = o.opacity;
     if (seekTo && !(video.currentTime >= o.start && video.currentTime < o.end)) seek(o.start + 0.001);
-    document.querySelector('#tabs [data-tab="insert"]').click();
+    openTab("insert");
   }
   renderOverlays(); drawTimeline();
 }
@@ -696,15 +748,15 @@ function setSpeed(v) {
 }
 function applySpeed(v) {
   const scope = $("spdScope").value, idx = speedTargets(scope);
-  if (!idx.length) return toast(scope === "sel" ? "클립을 체크하거나 단어를 선택하세요." : "적용할 클립이 없습니다.");
+  if (!idx.length) return toast(scope === "sel" ? "문단을 체크하거나 단어를 고르세요." : "적용할 문단이 없어요.");
   pushUndo();
   idx.forEach((ci) => { if (v === 1) delete S.clips[ci].speed; else S.clips[ci].speed = v; });
   commit(); applyPlaybackRate(); updateSpeedInfo();
-  toast(`클립 ${idx.length}개에 ${v}배속 적용`);
+  toast(`문단 ${idx.length}개를 ${v}배로`);
 }
 function updateSpeedInfo() {
   const n = S.clips.filter((c) => clipSpeed(c) !== 1).length;
-  $("spdInfo").textContent = n ? `배속이 적용된 클립 ${n}개` : "";
+  $("spdInfo").textContent = n ? `속도를 바꾼 문단 ${n}개` : "";
 }
 $("spdRange").addEventListener("input", () => setSpeed($("spdRange").value));
 $("spdNum").addEventListener("change", () => setSpeed($("spdNum").value));
@@ -713,9 +765,9 @@ $("spdApply").onclick = () => applySpeed(setSpeed($("spdNum").value));
 $("spdReset").onclick = () => applySpeed(1);
 $("script").addEventListener("click", (e) => {
   const chip = e.target.closest(".chip.spd"); if (!chip) return;
-  const ci = +chip.closest(".clip").dataset.c;
+  const ci = +chip.closest(".para").dataset.c;
   setSpeed(clipSpeed(S.clips[ci])); S.checked = new Set([ci]); render();
-  $("spdScope").value = "sel"; document.querySelector('#tabs [data-tab="effect"]').click();
+  $("spdScope").value = "sel"; openTab("effect");
 });
 
 /* ================= export ================= */
@@ -726,15 +778,15 @@ $("exportMenu").addEventListener("click", async (e) => {
   await saveNow();
   try {
     const j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind }));
-    if (kind.startsWith("mp4")) { S.exporting = true; modal("영상 내보내는 중", "준비 중…", 0); }
+    if (kind.startsWith("mp4")) { S.exporting = true; modal("완성본 만드는 중", "준비 중…", 0); }
     else exportDone(j.file);
   } catch (err) { toast(err.message, 4000); }
 });
 function exportDone(file) {
   const url = `/api/projects/${S.pid}/exports/${encodeURIComponent(file)}`;
-  modal("내보내기 완료", file, null, [
+  modal("완성본이 나왔어요", file, null, [
     ["폴더 열기", () => api(`/api/projects/${S.pid}/reveal`, { method: "POST" })],
-    ["다운로드", () => { const a = document.createElement("a"); a.href = url; a.download = file; a.click(); }],
+    ["저장하기", () => { const a = document.createElement("a"); a.href = url; a.download = file; a.click(); }],
     ["닫기", closeModal, true],
   ]);
 }
@@ -780,8 +832,8 @@ function highlightNow() {
   const el = tokEl(i);
   const ci = i >= 0 ? S.flat[i]._c : -1;
   if (ci !== nowClip) {
-    $("script").querySelector(".clip.active")?.classList.remove("active");
-    $("script").querySelector(`.clip[data-c="${ci}"]`)?.classList.add("active");
+    $("script").querySelector(".para.active")?.classList.remove("active");
+    $("script").querySelector(`.para[data-c="${ci}"]`)?.classList.add("active");
     nowClip = ci;
   }
   if (el) { el.classList.add("now"); if (!video.paused && S.followScroll) el.scrollIntoView({ block: "nearest" }); }
@@ -797,15 +849,15 @@ function drawTimeline() {
   if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
-  g.fillStyle = "#1f232b"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#1a2320"; g.fillRect(0, 0, w, h);
   if (!dur) return;
   for (const t of S.flat) {
     const x = (t.start / dur) * w, x2 = (t.end / dur) * w;
-    if (t.deleted) { g.fillStyle = "rgba(255,93,98,.75)"; g.fillRect(x, 0, Math.max(1, x2 - x), h); }
-    else if (t.type === "word") { g.fillStyle = "#4c8dff"; g.fillRect(x, h * 0.32, Math.max(0.5, x2 - x - 0.5), h * 0.36); }
+    if (t.deleted) { g.fillStyle = "rgba(255,111,97,.75)"; g.fillRect(x, 0, Math.max(1, x2 - x), h); }
+    else if (t.type === "word") { g.fillStyle = "#2ed3a2"; g.fillRect(x, h * 0.32, Math.max(0.5, x2 - x - 0.5), h * 0.36); }
   }
   for (const o of S.overlays) {
-    g.fillStyle = o.id === S.selOv ? "#ffd34d" : "rgba(243,214,122,.6)";
+    g.fillStyle = o.id === S.selOv ? "#ffc94a" : "rgba(243,214,122,.6)";
     g.fillRect((o.start / dur) * w, 2, Math.max(2, ((o.end - o.start) / dur) * w), 4);
   }
   const r = selRange();

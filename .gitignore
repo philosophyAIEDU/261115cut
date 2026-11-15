@@ -6,3 +6,4 @@ workspace/
 *.exe
 *.tmp
 .netlify/
+build/

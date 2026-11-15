@@ -41,8 +41,24 @@ def _candidate_dirs():
     return dirs
 
 
+def _bundled_dir() -> str | None:
+    """ffmpeg shipped next to the installed SophiCut.exe (setup build)."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        d = os.path.join(os.path.dirname(sys.executable), "ffmpeg")
+        if os.path.isfile(os.path.join(d, "ffmpeg.exe")):
+            return d
+    return None
+
+
 def ensure_ffmpeg() -> bool:
     """Makes ffmpeg/ffprobe callable by name; returns False if not installed."""
+    b = _bundled_dir()
+    if b:
+        if not os.environ.get("PATH", "").startswith(b + os.pathsep):
+            os.environ["PATH"] = b + os.pathsep + os.environ.get("PATH", "")
+        return True
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         return True
     for d in _candidate_dirs():
