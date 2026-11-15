@@ -1,0 +1,3 @@
+# NVIDIA GPU 가속용 (NVIDIA 그래픽카드가 있을 때만 자동 설치됩니다)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>소피컷</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="titlebar">
+  <div class="brand" id="goHome"><span class="logo">S</span>소피컷</div>
+  <nav class="tabs" id="tabs" hidden>
+    <button data-tab="edit" class="on">편집</button>
+    <button data-tab="style">자막 서식</button>
+    <button data-tab="insert">삽입</button>
+    <button data-tab="effect">효과</button>
+  </nav>
+  <div class="title" id="projTitle"></div>
+  <div class="actions" id="editorActions" hidden>
+    <span class="save" id="saveState"></span>
+    <div class="menu">
+      <button class="primary" id="exportBtn">⇪ 내보내기</button>
+      <div class="menu-list" id="exportMenu" hidden>
+        <button data-kind="mp4sub">영상 + 자막 (MP4)</button>
+        <button data-kind="mp4">영상만 (MP4, 자막 없이)</button>
+        <button data-kind="srt">자막 파일 (SRT)</button>
+        <button data-kind="txt">대본 (TXT)</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- RIBBON -->
+<div class="ribbon" id="ribbon" hidden>
+  <div class="rpanel" data-panel="edit">
+    <button class="rb" id="undoBtn" title="Ctrl+Z"><i>↶</i>되돌리기</button>
+    <button class="rb" id="redoBtn" title="Ctrl+Shift+Z"><i>↷</i>다시실행</button>
+    <span class="rsep"></span>
+    <button class="rb" id="delSelBtn" title="Delete"><i>⌫</i>삭제/복원</button>
+    <button class="rb" id="splitBtn" title="Enter"><i>⇥</i>클립 나누기</button>
+    <button class="rb" id="mergeBtn"><i>⇤</i>클립 합치기</button>
+    <span class="rsep"></span>
+    <div class="rgroup">
+      <button class="rb" id="silenceBtn"><i>⏸</i>무음 줄이기</button>
+      <select id="silenceSel" title="이 길이 이상의 무음을 삭제">
+        <option value="0.4">0.4초↑</option><option value="0.7" selected>0.7초↑</option>
+        <option value="1">1초↑</option><option value="2">2초↑</option>
+      </select>
+    </div>
+    <button class="rb" id="fillerBtn" title="음, 어, 으 같은 군말 삭제"><i>∅</i>군말 삭제</button>
+    <button class="rb" id="restoreBtn"><i>⟲</i>모두 복원</button>
+    <span class="rsep"></span>
+    <input id="searchInput" class="search" placeholder="대본 검색 (Enter: 다음)">
+  </div>
+
+  <div class="rpanel" data-panel="style" hidden>
+    <div class="menu">
+      <button class="rb" id="presetBtn"><i>★</i>서식 모음</button>
+      <div class="preset-pop" id="presetPop" hidden></div>
+    </div>
+    <span class="rsep"></span>
+    <div class="field"><label>굵기</label>
+      <select id="sWeight"><option value="400">보통</option><option value="500">중간</option><option value="600">약간 굵게</option>
+        <option value="700">굵게</option><option value="800">아주 굵게</option><option value="900">가장 굵게</option></select></div>
+    <button class="tg" id="sItalic" title="기울임"><em>I</em></button>
+    <div class="field"><label>크기</label><input type="number" id="sSize" min="16" max="200" step="2"></div>
+    <div class="field"><label>글자색</label><input type="color" id="sColor"></div>
+    <span class="rsep"></span>
+    <div class="field fx"><button class="tg" id="sOutlineOn">테두리</button>
+      <input type="color" id="sOutlineColor"><input type="number" id="sOutlineW" min="1" max="20" title="두께"></div>
+    <div class="field fx"><button class="tg" id="sBgOn">배경</button>
+      <input type="color" id="sBgColor"><input type="number" id="sBgOp" min="10" max="100" step="5" title="불투명도 %"></div>
+    <div class="field fx"><button class="tg" id="sHlOn">형광펜</button><input type="color" id="sHlColor"></div>
+    <div class="field fx"><button class="tg" id="sShadowOn">그림자</button><input type="color" id="sShadowColor"></div>
+    <span class="rsep"></span>
+    <div class="field"><label>자간</label><input type="number" id="sSpacing" min="-10" max="30"></div>
+    <div class="field"><label>한 줄 글자수</label><input type="number" id="sMaxChars" min="8" max="80"></div>
+    <div class="field"><label>세로 위치</label><input type="range" id="sPosY" min="0.15" max="0.98" step="0.01"></div>
+  </div>
+
+  <div class="rpanel" data-panel="effect" hidden>
+    <span class="rlabel"><i>⏩</i>배속 효과</span>
+    <span class="rsep"></span>
+    <div class="field"><label>속도</label>
+      <input type="range" id="spdRange" min="0.5" max="4" step="0.05" value="1.2">
+      <input type="number" id="spdNum" min="0.5" max="4" step="0.05" value="1.2"><span class="unit">x</span></div>
+    <div class="quick" id="spdQuick">
+      <button data-v="0.8">0.8x</button><button data-v="1.2">1.2x</button><button data-v="1.5">1.5x</button><button data-v="2">2x</button>
+    </div>
+    <span class="rsep"></span>
+    <div class="field"><label>적용 범위</label>
+      <select id="spdScope">
+        <option value="all">전체 클립</option>
+        <option value="sel">선택한 클립</option>
+        <option value="cur">현재 클립</option>
+      </select></div>
+    <button class="primary" id="spdApply">적용</button>
+    <button id="spdReset" title="적용 범위의 클립을 1배속으로">⟲ 1x로 되돌리기</button>
+    <span class="hint" id="spdInfo"></span>
+  </div>
+
+  <div class="rpanel" data-panel="insert" hidden>
+    <label class="rb file"><i>🖼</i>이미지 넣기<input type="file" id="imgInput" accept="image/*" hidden></label>
+    <span class="hint" id="insertHint">선택한 클립 구간(또는 재생 위치의 클립)에 이미지를 넣습니다. 화면에서 끌어서 옮기세요.</span>
+    <div class="ov-tools" id="ovTools" hidden>
+      <span class="rsep"></span>
+      <div class="field"><label>크기</label><input type="range" id="ovW" min="0.03" max="1" step="0.01"></div>
+      <div class="field"><label>투명도</label><input type="range" id="ovOp" min="0.1" max="1" step="0.05"></div>
+      <button class="rb" id="ovStartBtn"><i>⇤</i>시작=현재</button>
+      <button class="rb" id="ovEndBtn"><i>⇥</i>끝=현재</button>
+      <button class="rb" id="ovAllBtn"><i>↔</i>영상 전체</button>
+      <button class="rb danger" id="ovDelBtn"><i>✕</i>이미지 삭제</button>
+    </div>
+  </div>
+</div>
+
+<!-- HOME -->
+<main id="home" class="home">
+  <label class="drop" id="drop">
+    <input type="file" id="fileInput" accept="video/*,audio/*,.mkv,.mov,.avi,.wmv,.flv,.m4a,.wav,.mp3" hidden>
+    <div class="drop-icon">＋</div>
+    <div class="drop-main">영상을 끌어다 놓거나 클릭해서 새로 만들기</div>
+    <div class="drop-sub">이 컴퓨터의 AI가 한국어 대본을 만듭니다. 파일은 외부로 전송되지 않습니다.</div>
+  </label>
+  <div class="opts">
+    <label>AI 모델 <select id="modelSel"></select></label>
+    <span class="sys" id="sysInfo"></span>
+  </div>
+  <div class="upload" id="uploadBox" hidden>
+    <div class="bar"><i id="uploadBar"></i></div>
+    <div id="uploadText">불러오는 중…</div>
+  </div>
+  <section class="recent">
+    <h3>최근 프로젝트</h3>
+    <ul id="recentList"></ul>
+  </section>
+</main>
+
+<!-- EDITOR -->
+<main id="editor" class="editor" hidden>
+  <section class="left" id="leftCol">
+    <div class="player" id="player">
+      <video id="video" preload="auto" playsinline></video>
+      <div class="stage" id="stage">
+        <div class="ov-layer" id="ovLayer"></div>
+        <div class="sub-block" id="subBlock"><span class="sub-line" id="subLine"></span></div>
+      </div>
+      <div class="overlay" id="videoOverlay" hidden></div>
+    </div>
+    <div class="transport">
+      <button class="play" id="playBtn">▶</button>
+      <span class="time" id="timeText">00:00.0</span>
+      <label class="chk"><input type="checkbox" id="skipChk" checked> 삭제 구간 건너뛰기</label>
+      <label class="chk"><input type="checkbox" id="capChk" checked> 자막</label>
+      <span class="len" id="lenText"></span>
+    </div>
+    <canvas id="timeline" height="34"></canvas>
+    <div class="help">
+      <b>단어 클릭</b> 이동 · <b>드래그·Shift+클릭</b> 범위 선택 · <b>Delete</b> 삭제/복원 ·
+      <b>더블클릭</b> 글자 수정 · <b>Enter</b> 클립 나누기 · <b>Space</b> 재생 · <b>Ctrl+Z</b> 되돌리기
+    </div>
+  </section>
+  <section class="right">
+    <div class="list-head">
+      <label class="ck"><input type="checkbox" id="checkAll"> 전체 선택</label>
+      <span class="count" id="clipCount"></span>
+      <button class="mini danger" id="ckDelBtn" disabled>선택 클립 삭제/복원</button>
+      <button class="mini" id="ckMergeBtn" disabled>선택 클립 합치기</button>
+    </div>
+    <div class="status" id="statusBox" hidden>
+      <div class="bar"><i id="statusBar"></i></div>
+      <div id="statusText"></div>
+    </div>
+    <div class="script" id="script"></div>
+  </section>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card">
+    <h3 id="modalTitle">내보내는 중</h3>
+    <div class="bar"><i id="modalBar"></i></div>
+    <p id="modalText"></p>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
