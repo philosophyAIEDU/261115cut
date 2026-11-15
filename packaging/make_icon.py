@@ -29,5 +29,8 @@ if __name__ == "__main__":
     import os
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     sizes = [16, 24, 32, 48, 64, 128, 256]
-    mark().resize((256, 256), Image.LANCZOS).save(out, sizes=[(s, s) for s in sizes])
+    if out.lower().endswith(".png"):  # macOS: PyInstaller turns a 1024px PNG into .icns
+        mark().save(out)
+    else:
+        mark().resize((256, 256), Image.LANCZOS).save(out, sizes=[(s, s) for s in sizes])
     print("wrote", out)

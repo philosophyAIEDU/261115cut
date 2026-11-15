@@ -42,13 +42,15 @@ def _candidate_dirs():
 
 
 def _bundled_dir() -> str | None:
-    """ffmpeg shipped next to the installed SophiCut.exe (setup build)."""
+    """ffmpeg shipped with the installed app (Windows: next to SophiCut.exe, macOS: inside the .app)."""
     import sys
 
     if getattr(sys, "frozen", False):
-        d = os.path.join(os.path.dirname(sys.executable), "ffmpeg")
-        if os.path.isfile(os.path.join(d, "ffmpeg.exe")):
-            return d
+        exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        for base in (os.path.dirname(sys.executable), getattr(sys, "_MEIPASS", "")):
+            d = os.path.join(base, "ffmpeg")
+            if base and os.path.isfile(os.path.join(d, exe)):
+                return d
     return None
 
 

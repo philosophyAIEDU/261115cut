@@ -19,7 +19,10 @@ from . import REPO, __version__, editing, media, subrender, transcriber
 
 ROOT = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)  # installed build (SophiCut.exe)
-APPDATA = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "SophiCut"
+if sys.platform == "darwin":
+    APPDATA = Path.home() / "Library" / "Application Support" / "SophiCut"
+else:
+    APPDATA = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "SophiCut"
 
 
 def _data_dir() -> Path:
@@ -170,6 +173,14 @@ def system():
 _update_cache: dict = {}
 
 
+def _asset_name() -> str:
+    """Release file that fits this computer (names are fixed by the release workflow)."""
+    if sys.platform == "darwin":
+        import platform
+        return "SophiCut-Mac-AppleSilicon.dmg" if platform.machine() == "arm64" else "SophiCut-Mac-Intel.dmg"
+    return "SophiCut-Setup.exe"
+
+
 def _ver(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
 
@@ -189,7 +200,7 @@ def check_update():
                 rel = json.load(r)
             latest = rel.get("tag_name", "").lstrip("v")
             setup = next((a["browser_download_url"] for a in rel.get("assets", [])
-                          if a["name"].lower().endswith(".exe")), None)
+                          if a["name"] == _asset_name()), None)
             info.update(latest=latest, available=_ver(latest) > _ver(__version__),
                         url=setup or rel.get("html_url"), page=rel.get("html_url"),
                         notes=(rel.get("body") or "")[:2000])
@@ -248,7 +259,7 @@ def quit_app():
     return jsonify(ok=True)
 
 
-def _watchdog(idle_limit: float = 180) -> None:
+def _watchdog(idle_limit: float = 90 if sys.platform == "darwin" else 180) -> None:
     """Installed build has no console window: exit once no browser tab has pinged for a while."""
     started = time.time()
     while True:
@@ -509,6 +520,9 @@ def reveal(pid):
     d.mkdir(exist_ok=True)
     if os.name == "nt":
         os.startfile(d)  # noqa: S606 - local desktop app
+    else:
+        import subprocess
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(d)])
     return jsonify(ok=True, path=str(d))
 
 
@@ -517,6 +531,10 @@ def _alert(msg: str) -> None:
     if FROZEN and os.name == "nt":
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, msg, "소피컷", 0x40)
+    elif FROZEN and sys.platform == "darwin":
+        import subprocess
+        text = msg.replace("\\", "\\\\").replace('"', '\\"')
+        subprocess.run(["osascript", "-e", f'display dialog "{text}" with title "소피컷" buttons {{"확인"}}'])
 
 
 def _probe_port(port: int) -> str:
@@ -544,8 +562,9 @@ def main():
     else:
         ports = list(range(7860, 7870))
     if not media.ensure_ffmpeg():
-        _alert("ffmpeg를 찾을 수 없습니다.\n명령 프롬프트에서 다음을 실행한 뒤 다시 시작해 주세요:\n"
-               "    winget install Gyan.FFmpeg")
+        _alert("ffmpeg를 찾을 수 없습니다. 소피컷을 다시 설치해 주세요."
+               + ("\n(소스 실행 중이라면: winget install Gyan.FFmpeg)" if os.name == "nt"
+                  else "\n(소스 실행 중이라면: brew install ffmpeg)"))
         return
     port = None
     for p in ports:
