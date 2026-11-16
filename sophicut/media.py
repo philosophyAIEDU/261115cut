@@ -182,7 +182,19 @@ def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, image
     burn = meta["has_video"] and bool(subtitles and subtitles[0])
     compose = burn or bool(images)
     split = 0.6 if compose else 0.95  # share of progress for the per-piece pass
-    venc = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20"] if (meta["has_video"] and _nvenc_ok()) else            ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
+    x264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
+    venc = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20"] if (meta["has_video"] and _nvenc_ok()) else x264
+
+    def encode(build, dur, base, span, cwd=None):
+        """Runs ffmpeg; if the GPU encoder fails (driver, size limit, busy), retries once on the CPU."""
+        nonlocal venc
+        try:
+            _ffmpeg_progress(build(venc), dur, cb, base=base, span=span, cwd=cwd)
+        except RuntimeError:
+            if venc is x264:
+                raise
+            venc = x264
+            _ffmpeg_progress(build(venc), dur, cb, base=base, span=span, cwd=cwd)
     work = tempfile.mkdtemp(prefix="sophicut_")
     try:
         listing = []
@@ -191,22 +203,26 @@ def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, image
             d = (e - s) / sp  # output duration of this piece
             piece = os.path.join(work, f"p{i:05}.mkv")
             fade = min(0.006, d / 4)
-            args = ["ffmpeg", "-y", "-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", src]
-            if meta["has_video"]:
-                args += ["-map", "0:v:0"]
-                if sp != 1:  # speed effect: retime frames, keep a constant frame rate
-                    args += ["-vf", f"setpts=PTS/{sp:.4f},fps={fps}"]
-                args += [*venc, "-pix_fmt", "yuv420p"]
-            tempo = f"atempo={sp:.4f}," if sp != 1 else ""  # atempo keeps the pitch
-            args += ["-map", "0:a:0", "-af",
-                     f"{tempo}afade=t=in:d={fade:.4f},afade=t=out:st={max(d - fade, 0):.4f}:d={fade:.4f}",
-                     "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", piece]
-            _ffmpeg_progress(args, d, cb, base=split * done / total, span=split * d / total)
+
+            def piece_args(vc, s=s, e=e, sp=sp, d=d, fade=fade, piece=piece):
+                args = ["ffmpeg", "-y", "-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", src]
+                if meta["has_video"]:
+                    args += ["-map", "0:v:0"]
+                    # speed effect retimes frames; fps keeps every piece at the same constant rate
+                    vf = (f"setpts=PTS/{sp:.4f}," if sp != 1 else "") + f"fps={fps}"
+                    args += ["-vf", vf, *vc, "-pix_fmt", "yuv420p"]
+                tempo = f"atempo={sp:.4f}," if sp != 1 else ""  # atempo keeps the pitch
+                args += ["-map", "0:a:0", "-af",
+                         f"{tempo}afade=t=in:d={fade:.4f},afade=t=out:st={max(d - fade, 0):.4f}:d={fade:.4f}",
+                         "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", piece]
+                return args
+            encode(piece_args, d, split * done / total, split * d / total)
             done += d
             listing.append(f"file '{piece.replace(chr(92), '/')}'")
         Path(work, "list.txt").write_text(chr(10).join(listing), encoding="utf-8")
         tmp_out = os.path.abspath(out + ".part.mp4")
         args = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt"]
+        vpos = None  # index in args where the video encoder options go
         if compose:
             W, H = int(meta["width"]), int(meta["height"])
             graph, cur, n = [], "[0:v]", 1
@@ -228,11 +244,14 @@ def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, image
                 graph.append(f"{cur}[subs]overlay=0:0:eof_action=pass[vs]")
                 cur = "[vs]"
             graph.append(f"{cur}format=yuv420p[vout]")
-            args += ["-filter_complex", ";".join(graph), "-map", "[vout]", "-map", "0:a", *venc]
+            args += ["-filter_complex", ";".join(graph), "-map", "[vout]", "-map", "0:a"]
+            vpos = len(args)
         elif meta["has_video"]:
             args += ["-c:v", "copy"]
         args += ["-c:a", "aac", "-b:a", "192k", "-t", f"{total:.3f}", "-movflags", "+faststart", tmp_out]
-        _ffmpeg_progress(args, total, cb, base=split, span=1 - split, cwd=work)
+        final = args
+        encode(lambda vc: final if vpos is None else final[:vpos] + vc + final[vpos:],
+               total, split, 1 - split, cwd=work)
         os.replace(tmp_out, out)
     finally:
         shutil.rmtree(work, ignore_errors=True)

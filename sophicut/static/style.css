@@ -186,7 +186,9 @@ input[type=range].full { width: 100%; }
 .chip.img, .chip.spd { font-size: 11.5px; line-height: 1.6; padding: 0 8px; margin-right: 6px; border-radius: 999px; align-self: center; cursor: pointer; }
 .chip.img { background: #2c2716; color: #f3d67a; border: 1px solid #5c4f24; }
 .chip.spd { background: #12302a; color: var(--accent); border: 1px solid #1f5a4a; }
-.chip input { font: inherit; border: 0; outline: 0; background: var(--panel2); padding: 0 2px; width: 6em; color: #fff; border-radius: 4px; }
+.chip.editing { background: var(--panel2) !important; color: #fff; outline: 2px solid var(--accent); outline-offset: 0;
+  text-decoration: none; cursor: text; user-select: text; -webkit-user-select: text; caret-color: var(--accent);
+  min-width: 1.2em; padding: 1px 5px; white-space: pre; }
 
 /* viewer */
 .viewer { padding: 16px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--line); background: var(--panel); min-width: 0; overflow-y: auto; }

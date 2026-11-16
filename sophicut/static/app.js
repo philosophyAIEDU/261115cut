@@ -321,6 +321,7 @@ const clipRange = (c) => [c.tokens[0].start, c.tokens[c.tokens.length - 1].end];
 
 /* ================= manuscript render ================= */
 function render() {
+  if (S.editing) S.editing.apply(true);  // keep a word that is being edited
   const box = $("script"), scroll = box.scrollTop;
   box.innerHTML = "";
   const frag = document.createDocumentFragment();
@@ -381,13 +382,17 @@ function updateCheckUI() {
 const script = $("script");
 script.addEventListener("mousedown", (e) => {
   if (e.target.closest("input")) return;
+  if (S.editing) {
+    if (S.editing.el.contains(e.target)) return;  // clicks inside the word move the caret
+    S.editing.finish(true);  // clicking elsewhere saves the word first
+  }
   const ovChip = e.target.closest(".chip.img");
   if (ovChip) { selectOverlay(ovChip.dataset.ov, true); return; }
-  const el = e.target.closest(".chip[data-i]");
-  if (!el) return;
+  const hitEl = e.target.closest(".chip[data-i]");
+  if (!hitEl) return;
   e.preventDefault();
   S.focus = "script";
-  const i = +el.dataset.i;
+  const i = +hitEl.dataset.i;
   if (e.shiftKey && S.anchor != null) S.sel = { a: S.anchor, b: i };
   else { S.anchor = i; S.sel = { a: i, b: i }; }
   S.dragging = true; S.moved = false; paintSel(); drawTimeline();
@@ -404,8 +409,10 @@ document.addEventListener("mouseup", (e) => {
   if (!S.moved && !e.shiftKey && S.sel) seek(S.flat[S.sel.a].start + 0.001);
 });
 script.addEventListener("dblclick", (e) => {
+  if (S.editing?.el.contains(e.target)) return;  // double-click inside the word = normal text selection
   const el = e.target.closest(".chip.word"); if (!el) return;
-  editWord(+el.dataset.i, el);
+  e.preventDefault();
+  editWord(+el.dataset.i, el, { x: e.clientX, y: e.clientY });
 });
 script.addEventListener("change", (e) => {
   if (!e.target.matches(".ck input")) return;
@@ -421,28 +428,93 @@ $("checkAll").onchange = (e) => {
 $("ckDelBtn").onclick = () => toggleDeleteClips([...S.checked]);
 $("ckMergeBtn").onclick = () => mergeClips([...S.checked]);
 
-function editWord(i, el) {
+/* in-place word editing: the word chip itself becomes editable, so the caret goes
+   exactly where you click and the box grows with the text */
+function caretRangeAt(x, y) {
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) { const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r; }
+  }
+  return document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+}
+function editWord(i, el, at = null) {
+  if (S.editing) S.editing.finish(true);
+  el = tokEl(i) || el;
   const t = S.flat[i];
-  const input = document.createElement("input");
-  input.value = t.text; el.textContent = ""; el.appendChild(input); input.focus(); input.select();
-  input.style.width = `${Math.max(3, t.text.length + 2)}em`;
+  if (!el || !t || t.type !== "word") return;
+  el.classList.remove("sel", "hit");
+  el.classList.add("editing");
+  el.textContent = t.text;
+  try { el.contentEditable = "plaintext-only"; } catch { /* older browsers */ }
+  if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+  el.spellcheck = false;
+  el.focus({ preventScroll: true });
+  const sel = getSelection();
+  let r = at ? caretRangeAt(at.x, at.y) : null;
+  if (!r || !el.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(el); }
+  sel.removeAllRanges(); sel.addRange(r);
+
   let done = false;
-  const finish = (save) => {
-    if (done) return; done = true;
-    const v = input.value.trim();
-    if (save && v && v !== t.text) { pushUndo(); t.text = v; commit(); } else render();
+  const read = () => el.textContent.replace(/\s+/g, " ").trim();
+  // apply the edit to the model (no re-render); returns true if something changed
+  const apply = (save) => {
+    if (done) return false; done = true; S.editing = null;
+    el.removeEventListener("blur", onBlur);
+    const v = read();
+    if (!save) return false;
+    if (!v) {
+      if (t.deleted) return false;
+      pushUndo(); t.deleted = true;
+      toast("단어를 다 지워서 그 부분을 잘라냈어요. (Ctrl+Z로 되돌리기)", 3200);
+      return true;
+    }
+    if (v === t.text) return false;
+    pushUndo(); t.text = v; return true;
   };
-  input.addEventListener("keydown", (ev) => {
+  const finish = (save) => {
+    if (done) return;
+    const changed = apply(save);
+    getSelection().removeAllRanges();
+    changed ? commit() : render();
+  };
+  // switching to another window also blurs; keep editing until focus moves inside the page
+  const onBlur = () => setTimeout(() => { if (document.hasFocus() && document.activeElement !== el) finish(true); }, 0);
+  el.addEventListener("blur", onBlur);
+  el.addEventListener("keydown", (ev) => {
     ev.stopPropagation();
-    if (ev.key === "Enter") finish(true);
-    if (ev.key === "Escape") finish(false);
+    if (ev.isComposing || ev.keyCode === 229) return;  // Korean IME still composing
+    if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+    else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+    else if (ev.key === "Tab") {  // Tab / Shift+Tab: save and edit the next / previous word
+      ev.preventDefault();
+      finish(true);
+      const d = ev.shiftKey ? -1 : 1;
+      let j = i + d;
+      while (j >= 0 && j < S.flat.length && S.flat[j].type !== "word") j += d;
+      if (j >= 0 && j < S.flat.length) {
+        S.sel = { a: j, b: j }; S.anchor = j; paintSel();
+        tokEl(j)?.scrollIntoView({ block: "nearest" });
+        editWord(j, tokEl(j));
+      }
+    }
   });
-  input.addEventListener("blur", () => finish(true));
+  el.addEventListener("paste", (ev) => {
+    ev.preventDefault();
+    const txt = (ev.clipboardData?.getData("text/plain") || "").replace(/\s+/g, " ");
+    document.execCommand("insertText", false, txt);
+  });
+  S.editing = { i, el, apply, finish };
 }
 
 document.addEventListener("keydown", (e) => {
-  if ($("editor").hidden || e.target.matches("input, select, textarea")) return;
+  if ($("editor").hidden || e.target.matches("input, select, textarea") || e.target.isContentEditable) return;
   const r = selRange(), k = e.key;
+  if (k === "F2" && r) {  // F2: edit the selected word (all text selected)
+    e.preventDefault();
+    const j = S.flat[r[0]].type === "word" ? r[0] : r[1];
+    if (S.flat[j].type === "word") editWord(j, tokEl(j));
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
   if (k === " ") { e.preventDefault(); togglePlay(); return; }
@@ -773,8 +845,10 @@ $("script").addEventListener("click", (e) => {
 /* ================= export ================= */
 $("exportBtn").onclick = (e) => { e.stopPropagation(); $("exportMenu").hidden = !$("exportMenu").hidden; };
 $("exportMenu").addEventListener("click", async (e) => {
-  const kind = e.target.dataset.kind; if (!kind) return;
+  // the menu buttons contain <b>/<small>, so the click target is often a child element
+  const kind = e.target.closest("button[data-kind]")?.dataset.kind; if (!kind) return;
   $("exportMenu").hidden = true;
+  if (S.editing) S.editing.finish(true);
   await saveNow();
   try {
     const j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind }));
@@ -836,7 +910,7 @@ function highlightNow() {
     $("script").querySelector(`.para[data-c="${ci}"]`)?.classList.add("active");
     nowClip = ci;
   }
-  if (el) { el.classList.add("now"); if (!video.paused && S.followScroll) el.scrollIntoView({ block: "nearest" }); }
+  if (el) { el.classList.add("now"); if (!video.paused && S.followScroll && !S.editing) el.scrollIntoView({ block: "nearest" }); }
 }
 $("script").addEventListener("wheel", () => (S.followScroll = false), { passive: true });
 
