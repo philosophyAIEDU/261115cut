@@ -167,6 +167,7 @@ async function openProject(pid) {
   const { project, status } = await api(`/api/projects/${pid}`);
   S.pid = pid; S.project = project; S.undo = []; S.redo = []; S.sel = null; S.checked.clear(); S.selOv = null;
   S.style = project.style; S.overlays = project.overlays || [];
+  S.exporting = status?.export?.state === "running";  // reopened while an export runs: show its progress
   setClips(project.clips || []);
   $("home").hidden = true; $("editor").hidden = false; $("ribbon").hidden = false; $("tabs").hidden = false;
   $("editorActions").hidden = false; $("docInfo").hidden = false;
@@ -272,7 +273,8 @@ async function saveNow() {
   try {
     await api(`/api/projects/${S.pid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: payload() });
     $("saveState").textContent = "자동 저장됨";
-  } catch { $("saveState").textContent = "저장 실패"; }
+    return true;
+  } catch { $("saveState").textContent = "저장 실패"; return false; }
 }
 function commit() { render(); scheduleSave(); updateCaption(); renderOverlays(); }
 
@@ -847,15 +849,34 @@ $("exportBtn").onclick = (e) => { e.stopPropagation(); $("exportMenu").hidden = 
 $("exportMenu").addEventListener("click", async (e) => {
   // the menu buttons contain <b>/<small>, so the click target is often a child element
   const kind = e.target.closest("button[data-kind]")?.dataset.kind; if (!kind) return;
+  e.stopPropagation();
   $("exportMenu").hidden = true;
-  if (S.editing) S.editing.finish(true);
-  await saveNow();
-  try {
-    const j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind }));
-    if (kind.startsWith("mp4")) { S.exporting = true; modal("완성본 만드는 중", "준비 중…", 0); }
-    else exportDone(j.file);
-  } catch (err) { toast(err.message, 4000); }
+  startExport(kind);
 });
+async function startExport(kind) {
+  if (!S.pid) return;
+  const video = kind.startsWith("mp4");
+  // show a reaction right away, even before saving / the server answers
+  modal(video ? "완성본 만드는 중" : "파일 만드는 중", "편집 내용을 저장하는 중…", video ? 0 : null);
+  try {
+    if (S.editing) S.editing.finish(true);
+    if (!(await saveNow())) throw new Error("편집 내용을 저장하지 못했습니다. 소피컷이 켜져 있는지 확인한 뒤 다시 눌러 주세요.");
+    if (!S.flat.some((t) => !t.deleted)) throw new Error("남은 구간이 없습니다. 원고에서 지운 부분을 일부 되살려 주세요.");
+    let j;
+    try {
+      j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind }));
+    } catch (err) {
+      // an export is already running (e.g. started before a page reload): follow its progress
+      if (video && /이미 내보내는 중/.test(err.message)) j = {};
+      else throw err;
+    }
+    if (video) { S.exporting = true; modal("완성본 만드는 중", "준비 중…", 0); }
+    else exportDone(j.file);
+  } catch (err) {
+    S.exporting = false;
+    modal("완성본을 만들지 못했어요", err.message || "알 수 없는 오류", null, [["닫기", closeModal, true]]);
+  }
+}
 function exportDone(file) {
   const url = `/api/projects/${S.pid}/exports/${encodeURIComponent(file)}`;
   modal("완성본이 나왔어요", file, null, [
