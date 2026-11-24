@@ -156,7 +156,20 @@ def run_export(pid: str, subtitles: bool = False) -> None:
 # ---------- routes ----------
 @app.get("/")
 def index():
-    return send_file(ROOT / "static" / "index.html")
+    # version the script/style URLs so a browser never keeps running an old app.js after an update
+    tag = f"{__version__}-{int(max((ROOT / 'static' / f).stat().st_mtime for f in ('app.js', 'style.css')))}"
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    html = html.replace('/static/app.js"', f'/static/app.js?v={tag}"').replace('/static/style.css"', f'/static/style.css?v={tag}"')
+    r = app.response_class(html, mimetype="text/html")
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+@app.after_request
+def _no_stale_static(r):
+    if request.path.startswith("/static/"):
+        r.headers["Cache-Control"] = "no-cache"  # revalidate (cheap 304) instead of heuristic caching
+    return r
 
 
 @app.get("/api/system")
