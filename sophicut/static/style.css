@@ -129,7 +129,7 @@ kbd { font-family: inherit; font-size: 11.5px; background: var(--panel2); border
 .search { width: 100%; }
 .field { display: flex; align-items: center; gap: 8px; }
 .field label { color: var(--muted); font-size: 12.5px; width: 74px; flex: none; }
-.field select { flex: 1; }
+.field select { flex: 1; min-width: 0; text-overflow: ellipsis; }
 .field.fx .tg { width: 74px; flex: none; }
 .field.fx input[type=number] { width: 60px; }
 .tg { padding: 6px 10px; font-size: 12.5px; }
@@ -141,6 +141,26 @@ input[type=range].full { width: 100%; }
 .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .quick button { padding: 5px 0; font-size: 12.5px; }
 .ov-tools { display: flex; flex-direction: column; gap: 10px; }
+
+/* shorts */
+.sh-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.sh-list { display: flex; flex-direction: column; gap: 8px; }
+.sh-card { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
+.sh-card.off { opacity: .5; }
+.sh-card.cur { border-color: var(--accent); }
+.sh-top { display: flex; align-items: center; gap: 7px; }
+.sh-top .no { font-weight: 800; color: var(--accent); font-size: 12px; min-width: 18px; }
+.sh-card input.sh-title { flex: 1; min-width: 0; padding: 4px 7px; font-size: 13px; font-weight: 600; }
+.sh-meta { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sh-meta b { color: var(--soft); font-weight: 600; }
+.sh-meta .long { color: var(--warn); }
+.sh-tags { color: #9fb8ff; font-size: 11.5px; }
+.sh-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.sh-btns button { padding: 3px 8px; font-size: 11.5px; border-radius: 8px; }
+.sh-out { display: flex; flex-direction: column; gap: 10px; }
+.modal-files { margin: 0 0 14px; padding: 0; list-style: none; max-height: 40vh; overflow-y: auto; font-size: 13px; }
+.modal-files li { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.modal-files a { color: var(--accent); white-space: nowrap; }
 
 .preset-pop { margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .preset { position: relative; height: 62px; border-radius: 10px; background: #56635e; border: 2px solid transparent;
