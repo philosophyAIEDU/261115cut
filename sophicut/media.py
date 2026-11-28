@@ -164,7 +164,10 @@ def _nvenc_ok() -> bool:
     return r.returncode == 0
 
 
-def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, images=()):
+SHORT_W, SHORT_H = 1080, 1920
+
+
+def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, images=(), layout=None):
     """Encodes each kept range to an intermediate (h264 + PCM), then concatenates.
 
     Per-piece encoding keeps memory flat regardless of the number of cuts and
@@ -173,14 +176,18 @@ def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, image
 
     subtitles: (lines, style) -> rendered to PNGs and overlaid (output times).
     images: [{path, start, end, x, y, w, opacity}] in output time / frame fractions.
+    layout: None (keep the frame) or a vertical 1080x1920 short: "crop" fills the screen by
+            cutting the sides, "fit" shows the whole frame over a blurred copy of itself.
     """
+    if layout and not meta["has_video"]:
+        raise RuntimeError("영상이 없는 파일(소리만 있는 파일)은 세로 숏폼으로 만들 수 없습니다.")
     if not ranges:
         raise RuntimeError("남은 구간이 없습니다. 삭제를 일부 복원해 주세요.")
     total = sum((e - s) / sp for s, e, sp in ranges)
     fps = meta.get("fps") or 30.0
     images = [im for im in images if im["end"] - im["start"] > 0.04] if meta["has_video"] else []
     burn = meta["has_video"] and bool(subtitles and subtitles[0])
-    compose = burn or bool(images)
+    compose = burn or bool(images) or bool(layout)
     split = 0.6 if compose else 0.95  # share of progress for the per-piece pass
     x264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
     venc = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20"] if (meta["has_video"] and _nvenc_ok()) else x264
@@ -235,10 +242,23 @@ def export_cut(src: str, ranges, out: str, meta: dict, cb, subtitles=None, image
                              f"y=main_h*{im['y']:.4f}-overlay_h/2:"
                              f"enable='between(t,{im['start']:.3f},{im['end']:.3f})'[v{k}]")
                 cur, n = f"[v{k}]", n + 1
+            unit = None
+            if layout:  # images are placed on the original frame, then the frame is made vertical
+                OW, OH = SHORT_W, SHORT_H
+                if layout == "fit":
+                    graph.append(f"{cur}split[rfa][rfb]")
+                    graph.append(f"[rfa]scale={OW // 4}:{OH // 4}:force_original_aspect_ratio=increase,"
+                                 f"crop={OW // 4}:{OH // 4},boxblur=10:2,eq=brightness=-0.06,scale={OW}:{OH}[rbg]")
+                    graph.append(f"[rfb]scale={OW}:{OH}:force_original_aspect_ratio=decrease[rfg]")
+                    graph.append("[rbg][rfg]overlay=(W-w)/2:(H-h)/2,setsar=1[rf]")
+                else:
+                    graph.append(f"{cur}scale={OW}:{OH}:force_original_aspect_ratio=increase,"
+                                 f"crop={OW}:{OH},setsar=1[rf]")
+                cur, W, H, unit = "[rf]", OW, OH, OW
             if burn:
                 cb(split)
                 from . import subrender
-                sub_list = subrender.render_track(subtitles[0], subtitles[1], W, H, total, Path(work, "subs"))
+                sub_list = subrender.render_track(subtitles[0], subtitles[1], W, H, total, Path(work, "subs"), unit)
                 args += ["-f", "concat", "-safe", "0", "-i", str(sub_list)]
                 graph.append(f"[{n}:v]format=rgba[subs]")
                 graph.append(f"{cur}[subs]overlay=0:0:eof_action=pass[vs]")

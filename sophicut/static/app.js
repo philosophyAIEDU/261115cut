@@ -18,7 +18,7 @@ const FILLERS = new Set(["음", "어", "으", "흠", "엄", "응", "아", "에",
 const S = {
   pid: null, project: null, clips: [], flat: [], overlays: [], style: null,
   sel: null, anchor: null, dragging: false, moved: false, checked: new Set(),
-  selOv: null, focus: "script",
+  selOv: null, focus: "script", shorts: [],
   undo: [], redo: [], saveTimer: null, poll: null, followScroll: true, exporting: false,
 };
 
@@ -31,6 +31,7 @@ function modal(title, text, pct, actions = []) {
   $("modal").hidden = false; $("modalTitle").textContent = title; $("modalText").textContent = text || "";
   $("modalBar").parentElement.hidden = pct == null;
   if (pct != null) $("modalBar").style.width = `${Math.round(pct * 100)}%`;
+  $("modal").querySelector(".modal-files")?.remove();
   const box = $("modalActions"); box.innerHTML = "";
   for (const [label, fn, primary] of actions) {
     const b = document.createElement("button"); b.textContent = label; if (primary) b.className = "primary";
@@ -152,6 +153,7 @@ function openTab(tab) {
   $("tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   document.querySelectorAll(".rpanel").forEach((p) => (p.hidden = p.dataset.panel !== tab));
   $("presetPop").hidden = true; $("editor").classList.remove("closed");
+  if (tab === "shorts") renderShorts();
   requestAnimationFrame(fitPlayer);
 }
 $("tabs").addEventListener("click", (e) => {
@@ -166,14 +168,14 @@ $("tabs").addEventListener("click", (e) => {
 async function openProject(pid) {
   const { project, status } = await api(`/api/projects/${pid}`);
   S.pid = pid; S.project = project; S.undo = []; S.redo = []; S.sel = null; S.checked.clear(); S.selOv = null;
-  S.style = project.style; S.overlays = project.overlays || [];
+  S.style = project.style; S.overlays = project.overlays || []; S.shorts = project.shorts || [];
   S.exporting = status?.export?.state === "running";  // reopened while an export runs: show its progress
   setClips(project.clips || []);
   $("home").hidden = true; $("editor").hidden = false; $("ribbon").hidden = false; $("tabs").hidden = false;
   $("editorActions").hidden = false; $("docInfo").hidden = false;
   $("projTitle").textContent = project.name; history.replaceState(null, "", `#${pid}`);
   $("saveState").textContent = "";
-  loadVideo(); fitPlayer(); syncStyleControls(); render(); renderOverlays(); updateSpeedInfo(); handleStatus(status); startPoll();
+  loadVideo(); fitPlayer(); syncStyleControls(); render(); renderOverlays(); updateSpeedInfo(); renderShorts(); handleStatus(status); startPoll();
 }
 function loadVideo() {
   const v = $("video");
@@ -229,10 +231,10 @@ async function handleStatus(st) {
   if (pv.state === "done" && !S.project.preview) { S.project.preview = "preview.mp4"; loadVideo(); }
 
   if (ex.state === "running" && S.exporting) {
-    modal("완성본 만드는 중", ex.progress >= 0.6 && ex.progress < 0.62 ? "자막과 이미지를 입히는 중…" : "자른 부분을 빼고 이어 붙이는 중입니다.", ex.progress);
+    modal("완성본 만드는 중", ex.message || (ex.progress >= 0.6 && ex.progress < 0.62 ? "자막과 이미지를 입히는 중…" : "자른 부분을 빼고 이어 붙이는 중입니다."), ex.progress);
   } else if (ex.state && ex.state !== "running" && S.exporting) {
     S.exporting = false;
-    if (ex.state === "done") exportDone(ex.file);
+    if (ex.state === "done") exportDone(ex.file, ex.files);
     else modal("완성본을 만들지 못했어요", ex.error, null, [["닫기", closeModal, true]]);
   }
 }
@@ -262,7 +264,7 @@ function restore(json) {
 }
 function undo() { if (!S.undo.length) return; S.redo.push(snapshot()); restore(S.undo.pop()); }
 function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); }
-const payload = () => `{"clips":${JSON.stringify(S.clips, strip)},"overlays":${JSON.stringify(S.overlays)},"style":${JSON.stringify(S.style)}}`;
+const payload = () => `{"clips":${JSON.stringify(S.clips, strip)},"overlays":${JSON.stringify(S.overlays)},"style":${JSON.stringify(S.style)},"shorts":${JSON.stringify(S.shorts)}}`;
 function scheduleSave() {
   $("saveState").textContent = "저장 중…";
   clearTimeout(S.saveTimer);
@@ -276,7 +278,10 @@ async function saveNow() {
     return true;
   } catch { $("saveState").textContent = "저장 실패"; return false; }
 }
-function commit() { render(); scheduleSave(); updateCaption(); renderOverlays(); }
+function commit() {
+  render(); scheduleSave(); updateCaption(); renderOverlays();
+  if (S.shorts.length && !$("shList").closest(".rpanel").hidden) renderShorts();  // lengths change with cuts
+}
 
 function selRange() {
   if (!S.sel) return null;
@@ -853,18 +858,19 @@ $("exportMenu").addEventListener("click", async (e) => {
   $("exportMenu").hidden = true;
   startExport(kind);
 });
-async function startExport(kind) {
+async function startExport(kind, extra = {}) {
   if (!S.pid) return;
-  const video = kind.startsWith("mp4");
+  const video = kind.startsWith("mp4") || kind === "shorts";
   // show a reaction right away, even before saving / the server answers
   modal(video ? "완성본 만드는 중" : "파일 만드는 중", "편집 내용을 저장하는 중…", video ? 0 : null);
   try {
     if (S.editing) S.editing.finish(true);
     if (!(await saveNow())) throw new Error("편집 내용을 저장하지 못했습니다. 소피컷이 켜져 있는지 확인한 뒤 다시 눌러 주세요.");
     if (!S.flat.some((t) => !t.deleted)) throw new Error("남은 구간이 없습니다. 원고에서 지운 부분을 일부 되살려 주세요.");
+    if (kind === "shorts" && !S.shorts.some((x) => x.on !== false)) throw new Error("만들 숏폼을 하나 이상 체크해 주세요.");
     let j;
     try {
-      j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind }));
+      j = await api(`/api/projects/${S.pid}/export`, jsonOpt("POST", { kind, ...extra }));
     } catch (err) {
       // an export is already running (e.g. started before a page reload): follow its progress
       if (video && /이미 내보내는 중/.test(err.message)) j = {};
@@ -877,13 +883,122 @@ async function startExport(kind) {
     modal("완성본을 만들지 못했어요", err.message || "알 수 없는 오류", null, [["닫기", closeModal, true]]);
   }
 }
-function exportDone(file) {
+function exportDone(file, files) {
+  if (files) return shortsDone(file, files);
   const url = `/api/projects/${S.pid}/exports/${encodeURIComponent(file)}`;
   modal("완성본이 나왔어요", file, null, [
     ["폴더 열기", () => api(`/api/projects/${S.pid}/reveal`, { method: "POST" })],
     ["저장하기", () => { const a = document.createElement("a"); a.href = url; a.download = file; a.click(); }],
     ["닫기", closeModal, true],
   ]);
+}
+
+/* ================= shorts ================= */
+const SH_MAX = { short: 60, long: 180 };
+function keptBetween(a, b) {  // finished length of source range [a, b): cuts removed, speed applied
+  let d = 0;
+  for (const t of S.flat) {
+    if (t.deleted || t.end <= a || t.start >= b) continue;
+    d += (Math.min(t.end, b) - Math.max(t.start, a)) / clipSpeed(S.clips[t._c]);
+  }
+  return d;
+}
+function shortText(s) {
+  return joinWords(S.flat.filter((t) => t.type === "word" && !t.deleted && t.start >= s.start - 1e-3 && t.end <= s.end + 1e-3));
+}
+function renderShorts() {
+  const list = $("shList"); if (!list) return;
+  list.innerHTML = "";
+  const n = S.shorts.length, on = S.shorts.filter((x) => x.on !== false).length, max = SH_MAX[$("shMode").value] || 60;
+  $("shHead").hidden = $("shOut").hidden = !n;
+  $("shCount").textContent = n ? `${on}개 고름 · 전체 ${n}개` : "";
+  $("shAll").checked = n > 0 && on === n; $("shAll").indeterminate = on > 0 && on < n;
+  $("shExport").textContent = on ? `고른 숏폼 ${on}개 만들기` : "고른 숏폼 만들기"; $("shExport").disabled = !on;
+  $("shSuggest").lastChild.textContent = n ? "주제별로 다시 나누기" : "주제별로 나누기";
+  S.shorts.forEach((s, k) => {
+    const len = keptBetween(s.start, s.end);
+    const card = document.createElement("div");
+    card.className = "sh-card" + (s.on === false ? " off" : ""); card.dataset.k = k;
+    card.innerHTML = `<div class="sh-top"><input type="checkbox" class="sh-on" ${s.on === false ? "" : "checked"}>`
+      + `<span class="no">${k + 1}</span><input class="sh-title" maxlength="80"></div>`
+      + `<div class="sh-meta">${fmt(s.start)} ~ ${fmt(s.end)} · <b class="${len > max ? "long" : ""}">${Math.round(len)}초</b>`
+      + `${len > max ? ` <span class="long">(${max}초 넘음)</span>` : ""}</div>`
+      + `<div class="sh-tags"></div>`
+      + `<div class="sh-btns"><button data-act="play" title="이 구간 재생">▶ 보기</button>`
+      + `<button data-act="start" title="지금 재생 위치를 시작으로">시작=지금</button>`
+      + `<button data-act="end" title="지금 재생 위치를 끝으로">끝=지금</button>`
+      + `<button data-act="del" title="목록에서 빼기">✕</button></div>`;
+    card.querySelector(".sh-title").value = s.title || "";
+    card.querySelector(".sh-title").title = shortText(s).slice(0, 300);
+    card.querySelector(".sh-tags").textContent = (s.tags || []).map((t) => "#" + t).join(" ");
+    list.appendChild(card);
+  });
+  markCurShort(true); drawTimeline();
+}
+let curShort = -2;
+function markCurShort(force) {
+  if ($("shList")?.closest(".rpanel").hidden && !force) return;
+  const t = video.currentTime, k = S.shorts.findIndex((s) => t >= s.start && t < s.end);
+  if (k === curShort && !force) return;
+  curShort = k;
+  $("shList").querySelectorAll(".sh-card").forEach((c) => c.classList.toggle("cur", +c.dataset.k === k));
+}
+const shAt = (el) => S.shorts[+el.closest(".sh-card").dataset.k];
+$("shList").addEventListener("input", (e) => {
+  if (e.target.matches(".sh-title")) { shAt(e.target).title = e.target.value; scheduleSave(); }
+});
+$("shList").addEventListener("change", (e) => {
+  if (!e.target.matches(".sh-on")) return;
+  shAt(e.target).on = e.target.checked; scheduleSave(); renderShorts();
+});
+$("shList").addEventListener("keydown", (e) => e.stopPropagation());
+$("shList").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const s = shAt(b), t = video.currentTime;
+  const tok = S.flat[Math.max(0, findTok(t))];
+  if (b.dataset.act === "play") { seek(s.start + 0.001); S.stopAt = s.end; video.play(); return; }
+  if (b.dataset.act === "start") {
+    const v = tok ? tok.start : t;  // snap to the start of the word playing now
+    if (v >= s.end - 1) return toast("시작은 끝보다 1초 이상 앞이어야 해요.");
+    s.start = +v.toFixed(3);
+  } else if (b.dataset.act === "end") {
+    const v = tok ? tok.end : t;  // ... and to the end of the word for the end point
+    if (v <= s.start + 1) return toast("끝은 시작보다 1초 이상 뒤여야 해요.");
+    s.end = +v.toFixed(3);
+  } else if (b.dataset.act === "del") {
+    S.shorts.splice(S.shorts.indexOf(s), 1);
+  }
+  scheduleSave(); renderShorts();
+});
+$("shAll").onchange = (e) => { S.shorts.forEach((s) => (s.on = e.target.checked)); scheduleSave(); renderShorts(); };
+$("shMode").onchange = renderShorts;
+$("shSuggest").onclick = async () => {
+  if (!S.project?.transcribed) return toast("받아쓰기가 끝난 뒤에 나눌 수 있어요.");
+  if (S.shorts.length && !confirm("지금 숏폼 목록(고친 제목 포함)을 지우고 다시 나눌까요?")) return;
+  if (S.editing) S.editing.finish(true);
+  const btn = $("shSuggest"); btn.disabled = true;
+  try {
+    await saveNow();
+    const r = await api(`/api/projects/${S.pid}/shorts/suggest`, jsonOpt("POST", { mode: $("shMode").value }));
+    S.shorts = r.shorts; renderShorts();
+    toast(`주제가 바뀌는 곳을 찾아 숏폼 ${r.shorts.length}개로 나눴어요.`, 3200);
+  } catch (err) { toast(err.message, 4000); }
+  finally { btn.disabled = false; }
+};
+$("shExport").onclick = () => startExport("shorts", { layout: $("shLayout").value, subtitles: $("shSubs").checked });
+function shortsDone(folder, files) {
+  modal(`숏폼 ${files.length}개가 나왔어요`, `폴더: ${folder}  ·  제목·해시태그·설명은 '업로드_정보.txt'에 있어요.`, null, [
+    ["폴더 열기", () => api(`/api/projects/${S.pid}/reveal`, jsonOpt("POST", { folder }))],
+    ["닫기", closeModal, true],
+  ]);
+  const ul = document.createElement("ul"); ul.className = "modal-files";
+  for (const f of files) {
+    const li = document.createElement("li"), name = document.createElement("span"), a = document.createElement("a");
+    name.textContent = f.split("/").pop();
+    a.textContent = "저장"; a.href = `/api/projects/${S.pid}/exports/${f.split("/").map(encodeURIComponent).join("/")}`; a.download = name.textContent;
+    li.append(name, a); ul.appendChild(li);
+  }
+  $("modalActions").before(ul);
 }
 
 /* ================= playback (skips deleted ranges) ================= */
@@ -918,6 +1033,7 @@ function tick() {
   if (!video.paused) requestAnimationFrame(tick);
 }
 function highlightNow() {
+  markCurShort();
   $("timeText").textContent = fmt(video.currentTime);
   updateCaption(); renderOverlays();
   const i = findTok(video.currentTime);
@@ -954,6 +1070,11 @@ function drawTimeline() {
   for (const o of S.overlays) {
     g.fillStyle = o.id === S.selOv ? "#ffc94a" : "rgba(243,214,122,.6)";
     g.fillRect((o.start / dur) * w, 2, Math.max(2, ((o.end - o.start) / dur) * w), 4);
+  }
+  for (const s of S.shorts) {  // shorts: violet bars along the bottom
+    if (s.on === false) continue;
+    const x = (s.start / dur) * w, x2 = (s.end / dur) * w;
+    g.fillStyle = "rgba(160,150,255,.9)"; g.fillRect(x + 1, h - 5, Math.max(2, x2 - x - 2), 4);
   }
   const r = selRange();
   if (r) {

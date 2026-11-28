@@ -80,9 +80,10 @@ def _draw_line(d: ImageDraw.ImageDraw, x, y, text, f, spacing, fill, stroke=0, s
         x += f.getlength(ch) + spacing
 
 
-def render(text: str, style: dict, W: int, H: int) -> Image.Image:
+def render(text: str, style: dict, W: int, H: int, unit: float | None = None) -> Image.Image:
+    """unit: frame size that style lengths are relative to (default: the height; vertical shorts pass the width)."""
     st = merge_style(style)
-    s = H / 1080.0
+    s = (unit or H) / 1080.0
     px = max(8, round(st["size"] * s))
     f = font(st["weight"], px)
     spacing = st["spacing"] * s
@@ -140,7 +141,7 @@ def render(text: str, style: dict, W: int, H: int) -> Image.Image:
     return img
 
 
-def render_track(lines, style: dict, W: int, H: int, total: float, workdir: Path) -> Path:
+def render_track(lines, style: dict, W: int, H: int, total: float, workdir: Path, unit: float | None = None) -> Path:
     """Writes PNGs + an ffmpeg concat list that forms a transparent subtitle stream."""
     workdir.mkdir(parents=True, exist_ok=True)
     blank = workdir / "blank.png"
@@ -154,7 +155,7 @@ def render_track(lines, style: dict, W: int, H: int, total: float, workdir: Path
         if start - t > 0.001:
             entries.append((blank, start - t))
         png = workdir / f"s{i:05}.png"
-        render(text, style, W, H).save(png, optimize=False, compress_level=1)
+        render(text, style, W, H, unit).save(png, optimize=False, compress_level=1)
         entries.append((png, end - start))
         t = end
     entries.append((blank, max(total - t, 0.04)))

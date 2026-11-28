@@ -15,7 +15,7 @@ from urllib.parse import unquote
 
 from flask import Flask, abort, jsonify, request, send_file
 
-from . import REPO, __version__, editing, media, subrender, transcriber
+from . import REPO, __version__, editing, media, shorts, subrender, transcriber
 
 ROOT = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)  # installed build (SophiCut.exe)
@@ -129,7 +129,7 @@ def run_proxy(pid: str) -> None:
 
 @_job
 def run_export(pid: str, subtitles: bool = False) -> None:
-    set_status(pid, "export", state="running", progress=0, file=None, error=None)
+    set_status(pid, "export", state="running", progress=0, file=None, files=None, message=None, error=None)
     try:
         p = load(pid)
         ranges = editing.kept_ranges(p["clips"])
@@ -148,6 +148,53 @@ def run_export(pid: str, subtitles: bool = False) -> None:
         media.export_cut(str(PROJECTS / pid / p["source"]), ranges, str(out_dir / name), p["meta"],
                          lambda f: set_status(pid, "export", progress=f), subtitles=subs, images=images)
         set_status(pid, "export", state="done", progress=1, file=name)
+    except Exception as e:
+        traceback.print_exc()
+        set_status(pid, "export", state="error", error=str(e))
+
+
+@_job
+def run_shorts(pid: str, layout: str, subtitles: bool) -> None:
+    """Exports every checked short as its own vertical MP4 + an upload info text file."""
+    set_status(pid, "export", state="running", progress=0, file=None, files=None, error=None, message="준비 중…")
+    try:
+        p = load(pid)
+        items = [x for x in p.get("shorts", []) if x.get("on", True) and x["end"] - x["start"] > 1]
+        if not items:
+            raise RuntimeError("만들 숏폼이 없습니다. 숏폼 목록에서 하나 이상 체크해 주세요.")
+        folder = f"숏폼_{Path(p['name']).stem[:30]}_{time.strftime('%m%d_%H%M%S')}"
+        out_dir = PROJECTS / pid / "exports" / folder
+        out_dir.mkdir(parents=True)
+        base = subrender.merge_style(p.get("style"))
+        # phone-friendly captions: shorter lines, kept above the app buttons at the bottom
+        style = {**base, "maxChars": min(int(base["maxChars"]), 16), "posY": min(float(base["posY"]), 0.74)}
+        files, info = [], []
+        for k, item in enumerate(items):
+            clips = shorts.restrict(p["clips"], item["start"], item["end"])
+            ranges = editing.kept_ranges(clips)
+            if not ranges:
+                continue
+            tm = editing.TimeMap(ranges)
+            images = []
+            for o in p.get("overlays", []):
+                f = PROJECTS / pid / "assets" / Path(o["file"]).name
+                if f.is_file():
+                    images.append({**o, "path": str(f), "start": tm(o["start"]), "end": tm(o["end"])})
+            subs = (editing.subtitle_lines(clips, int(style["maxChars"])), style) if subtitles else None
+            title = (item.get("title") or "").strip() or f"숏폼 {k + 1}"
+            name = f"{k + 1:02}_{shorts.safe_name(title)}.mp4"
+            n = len(items)
+            set_status(pid, "export", message=f"숏폼 {k + 1}/{n} 만드는 중 · {title[:24]}")
+            media.export_cut(str(PROJECTS / pid / p["source"]), ranges, str(out_dir / name), p["meta"],
+                             lambda f, k=k, n=n: set_status(pid, "export", progress=(k + f) / n),
+                             subtitles=subs, images=images, layout=layout)
+            files.append(f"{folder}/{name}")
+            tags = " ".join("#" + t.replace(" ", "") for t in [*item.get("tags", []), "shorts"])
+            info.append(f"[{k + 1:02}] {name}\n제목: {title}\n해시태그: {tags}\n"
+                        f"원본 구간: {editing._srt_time(item['start'])[:8]} ~ {editing._srt_time(item['end'])[:8]} "
+                        f"· 길이 {tm.total:.0f}초\n\n설명:\n{editing.to_txt(clips).strip()}\n")
+        (out_dir / "업로드_정보.txt").write_text(("\n" + "-" * 40 + "\n\n").join(info), encoding="utf-8")
+        set_status(pid, "export", state="done", progress=1, file=folder, files=files, message=None)
     except Exception as e:
         traceback.print_exc()
         set_status(pid, "export", state="error", error=str(e))
@@ -334,7 +381,21 @@ def get_project(pid):
     p = load(pid)
     p["style"] = subrender.merge_style(p.get("style"))
     p.setdefault("overlays", [])
+    p.setdefault("shorts", [])
     return jsonify(project=p, status=get_status(pid))
+
+
+@app.post("/api/projects/<pid>/shorts/suggest")
+def suggest_shorts(pid):
+    mode = (request.get_json(silent=True) or {}).get("mode", "short")
+    p = load(pid)
+    if not p.get("transcribed"):
+        return jsonify(error="받아쓰기가 끝난 뒤에 나눌 수 있어요."), 400
+    items = shorts.suggest(p["clips"], mode if mode in shorts.MODES else "short")
+    if not items:
+        return jsonify(error="숏폼으로 나눌 말이 없습니다."), 400
+    mutate(pid, lambda p: p.update(shorts=items))
+    return jsonify(shorts=items)
 
 
 @app.get("/fonts/<path:fname>")
@@ -464,8 +525,8 @@ def status(pid):
 @app.put("/api/projects/<pid>")
 def put_project(pid):
     body = request.get_json(force=True)
-    upd = {k: body[k] for k in ("clips", "overlays", "style") if k in body}
-    if not upd or not all(isinstance(upd.get(k, []), list) for k in ("clips", "overlays")):
+    upd = {k: body[k] for k in ("clips", "overlays", "style", "shorts") if k in body}
+    if not upd or not all(isinstance(upd.get(k, []), list) for k in ("clips", "overlays", "shorts")):
         abort(400)
     mutate(pid, lambda p: p.update(upd))
     return jsonify(ok=True)
@@ -504,10 +565,15 @@ def media_file(pid):
 def export(pid):
     kind = (request.get_json(silent=True) or {}).get("kind", "mp4")
     p = load(pid)
-    if kind in ("mp4", "mp4sub"):
+    if kind in ("mp4", "mp4sub", "shorts"):
         if get_status(pid).get("export", {}).get("state") == "running":
             return jsonify(error="이미 내보내는 중입니다."), 409
-        run_export(pid, kind == "mp4sub")
+        if kind == "shorts":
+            body = request.get_json(silent=True) or {}
+            layout = body.get("layout") if body.get("layout") in ("crop", "fit") else "crop"
+            run_shorts(pid, layout, bool(body.get("subtitles", True)))
+        else:
+            run_export(pid, kind == "mp4sub")
         return jsonify(ok=True)
     if kind not in ("srt", "txt"):
         abort(400)
@@ -521,16 +587,20 @@ def export(pid):
 
 @app.get("/api/projects/<pid>/exports/<path:fname>")
 def download(pid, fname):
-    f = (pdir(pid) / "exports" / fname).resolve()
-    if f.parent != (pdir(pid) / "exports").resolve() or not f.is_file():
+    root = (pdir(pid) / "exports").resolve()
+    f = (root / fname).resolve()
+    if root not in f.parents or not f.is_file():  # files directly in exports/ or in a shorts folder
         abort(404)
-    return send_file(f, as_attachment=True, download_name=fname, conditional=True)
+    return send_file(f, as_attachment=True, download_name=f.name, conditional=True)
 
 
 @app.post("/api/projects/<pid>/reveal")
 def reveal(pid):
     d = pdir(pid) / "exports"
     d.mkdir(exist_ok=True)
+    sub = (request.get_json(silent=True) or {}).get("folder")
+    if sub and (d / Path(sub).name).is_dir():
+        d = d / Path(sub).name
     if os.name == "nt":
         os.startfile(d)  # noqa: S606 - local desktop app
     else:
